@@ -10,7 +10,7 @@
 <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
@@ -19,7 +19,7 @@
   <form class="login-card" id="login-form">
     <img src="/img/logo-black.png" alt="UNI STEEL" class="login-logo">
     <h1>لوحة التحكم</h1>
-    <p class="muted">ادخل كلمة السر عشان تعدّل في الموقع.</p>
+    <p class="muted">ادخل باسم المستخدم وكلمة السر عشان تعدّل في الموقع.</p>
     <label class="f"><span>اسم المستخدم</span><input type="text" id="login-user" autocomplete="username" dir="ltr" autocapitalize="none" spellcheck="false" required></label>
     <label class="f"><span>كلمة السر</span><input type="password" id="login-pw" autocomplete="current-password" required></label>
     <div class="err" id="login-err" hidden></div>
@@ -29,20 +29,38 @@
 </section>
 
 <div id="app" hidden>
-  <header class="top">
-    <div class="top-in">
-      <img src="/img/logo-white.png" alt="UNI STEEL" class="top-logo">
-      <span class="top-title">لوحة التحكم</span>
-      <span class="spacer"></span>
-      <span class="who" id="who"></span>
-      <a class="btn ghost-light" href="/" target="_blank" rel="noopener">عرض الموقع</a>
-      <button class="btn ghost-light" id="logout" type="button">خروج</button>
-    </div>
+  <header class="topbar">
+    <a class="brand" href="/admin/" aria-label="UNI STEEL"><img src="/img/logo-white.png" alt="UNI STEEL" class="brand-logo"></a>
+    <span class="brand-title">لوحة التحكم</span>
+    <span class="spacer"></span>
+    <a class="top-btn" href="/" target="_blank" rel="noopener" title="عرض الموقع">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>عرض الموقع</span>
+    </a>
+    <button class="top-btn" id="logout" type="button" title="خروج">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></svg><span>خروج</span>
+    </button>
+    <button class="burger" id="burger" type="button" aria-label="القائمة" aria-expanded="false" aria-controls="side"><span></span></button>
   </header>
 
-  <div class="wrap" id="banner-wrap" hidden><div class="hint-box bad" id="banner"></div></div>
-  <nav class="tabs" id="tabs"></nav>
-  <main class="wrap" id="panel"></main>
+  <div class="shell">
+    <aside class="side" id="side">
+      <nav id="tabs" aria-label="أقسام لوحة التحكم"></nav>
+      <div class="side-user">
+        <div class="avatar" id="avatar" aria-hidden="true"></div>
+        <div class="who-text"><b id="who-name"></b><small id="who-role"></small></div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <main class="main">
+      <div class="banner" id="banner-wrap" hidden><div class="hint-box bad" id="banner"></div></div>
+      <div class="panel-head">
+        <div class="panel-titles"><h1 id="panel-title"></h1><p id="panel-desc"></p></div>
+        <div class="head-actions" id="head-actions"></div>
+      </div>
+      <div id="panel"></div>
+    </main>
+  </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

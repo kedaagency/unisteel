@@ -57,7 +57,8 @@
 
   /* ---------- unsaved changes in the settings tabs (they live in `content` until "Save") ---------- */
   var dirty = false;
-  function touch(obj) { if (obj === content) dirty = true; }
+  function syncDirty() { var b = $("#savebar"); if (b) b.classList.toggle("dirty", dirty); }
+  function touch(obj) { if (obj === content) { dirty = true; syncDirty(); } }
   window.addEventListener("beforeunload", function (e) {
     if (dirty) { e.preventDefault(); e.returnValue = ""; }
   });
@@ -90,7 +91,7 @@
     var bad = siteLinkError();
     if (bad) { toast(bad, true); return Promise.resolve(false); }
     return api("/api/content", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(content) })
-      .then(function (j) { content = j.content; dirty = false; toast(msg || "تم الحفظ ✓"); return true; })
+      .then(function (j) { content = j.content; dirty = false; syncDirty(); toast(msg || "تم الحفظ ✓"); return true; })
       .catch(function (e) {
         if (e.message !== "auth") toast(STORAGE_ERRORS[e.code] || "فشل الحفظ. جرّب تاني.", true);
         return false;
@@ -272,22 +273,53 @@
   }
 
   /* ---------- panels ---------- */
-  var BASE_TABS = [["products", "المنتجات"], ["projects", "المشاريع"], ["images", "صور الرئيسية"], ["categories", "الأقسام"], ["company", "بيانات الشركة"], ["users", "المستخدمين"], ["security", "الأمان"]];
+  var ICON = function (d) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>"; };
+  var ICONS = {
+    products: ICON('<path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>'),
+    projects: ICON('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18"/>'),
+    images: ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/>'),
+    categories: ICON('<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>'),
+    company: ICON('<path d="M4 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16M14 10h5a1 1 0 0 1 1 1v10M8 8h2M8 12h2M8 16h2M2 21h20"/>'),
+    users: ICON('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.5c1.9.7 3 2.5 3 5.5"/>'),
+    security: ICON('<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 15v2.5"/>')
+  };
+  // [id, label, short explanation shown under the page title]
+  var BASE_TABS = [
+    ["products", "المنتجات", "أضف المنتجات وعدّل أسماءها وصورها ومواصفاتها."],
+    ["projects", "المشاريع", "الأماكن اللي جهزتوها: صور وفيديو وتفاصيل."],
+    ["images", "صور الرئيسية", "الصور اللي بتظهر في الصفحة الرئيسية وصفحة «من نحن»."],
+    ["categories", "الأقسام", "أسماء ووصف أقسام المنتجات."],
+    ["company", "بيانات الشركة", "أرقام التواصل والمهندسين والعنوان وأرقام الشركة."],
+    ["users", "المستخدمين", "مين يقدر يدخل ويعدّل في الموقع."],
+    ["security", "الأمان", "غيّر كلمة السر بتاعتك."]
+  ];
   var me = null; // the signed-in user: { username, name, role, builtin }
   function tabsList() { return BASE_TABS.filter(function (t) { return t[0] !== "users" || (me && me.role === "owner"); }); }
+
+  function openDrawer() { document.body.classList.add("nav-open"); $("#scrim").hidden = false; $("#burger").setAttribute("aria-expanded", "true"); }
+  function closeDrawer() { document.body.classList.remove("nav-open"); $("#scrim").hidden = true; $("#burger").setAttribute("aria-expanded", "false"); }
+  function setHeadActions(html) { $("#head-actions").innerHTML = html || ""; }
 
   function renderTabs() {
     $("#tabs").innerHTML = tabsList().map(function (t) {
       var n = t[0] === "products" ? content.products.length : t[0] === "projects" ? content.projects.length : "";
-      return '<button class="tab' + (t[0] === tab ? " on" : "") + '" data-tab="' + t[0] + '">' + t[1] + (n !== "" ? "<small>(" + n + ")</small>" : "") + "</button>";
+      return '<button type="button" class="nav-item' + (t[0] === tab ? " on" : "") + '" data-tab="' + t[0] + '"' + (t[0] === tab ? ' aria-current="page"' : "") + ">" +
+        ICONS[t[0]] + "<span>" + t[1] + "</span>" + (n !== "" ? '<em class="count">' + n + "</em>" : "") + "</button>";
     }).join("");
   }
+  var lastTab = null;
   function paintPanel() {
     if (!tabsList().some(function (t) { return t[0] === tab; })) tab = "products";
     renderTabs();
+    var meta = tabsList().filter(function (t) { return t[0] === tab; })[0];
+    $("#panel-title").textContent = meta[1];
+    $("#panel-desc").textContent = meta[2];
+    setHeadActions("");
+    closeDrawer();
     var p = $("#panel");
     var fn = { products: panelProducts, projects: panelProjects, images: panelImages, categories: panelCategories, company: panelCompany, users: panelUsers, security: panelSecurity }[tab];
     fn(p);
+    if (tab !== lastTab) { window.scrollTo(0, 0); lastTab = tab; }
   }
 
   /* ----- products ----- */
@@ -299,9 +331,10 @@
   function catName(id) { var c = content.categories.filter(function (x) { return x.id === id; })[0]; return c ? c.ar : ""; }
 
   function panelProducts(p) {
-    p.innerHTML = '<div class="bar"><input id="q" placeholder="ابحث عن منتج" value="' + esc(pFilter.q) + '">' +
-      '<select id="cf">' + catOptions(true).map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === pFilter.cat ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("") + "</select>" +
-      '<span class="spacer"></span><button class="btn primary" id="add-p">+ منتج جديد</button></div><div class="list" id="plist"></div>';
+    setHeadActions('<button class="btn primary" id="add-p" type="button">+ منتج جديد</button>');
+    p.innerHTML = '<div class="bar"><input id="q" type="search" placeholder="ابحث عن منتج بالاسم" value="' + esc(pFilter.q) + '">' +
+      '<select id="cf" aria-label="القسم">' + catOptions(true).map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === pFilter.cat ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("") + "</select></div>" +
+      '<div class="pgrid" id="plist"></div>';
     $("#q").oninput = function () { pFilter.q = this.value; paintProductList(); };
     $("#cf").onchange = function () { pFilter.cat = this.value; paintProductList(); };
     $("#add-p").onclick = function () { editProduct(null); };
@@ -314,11 +347,11 @@
     });
     var box = $("#plist");
     box.innerHTML = list.length ? list.map(function (x) {
-      return '<div class="row">' + (x.images[0] ? '<img class="thumb" src="' + esc(imgSrc(x.images[0])) + '" alt="">' : '<div class="thumb"></div>') +
-        '<div class="r-main"><b>' + esc(x.ar || x.en) + "</b><small>" + esc(x.en) + " · " + esc(catName(x.cat)) + " · " + x.images.length + " صور</small></div>" +
-        '<label class="chk"><input type="checkbox" data-feat="' + esc(x.id) + '"' + (x.featured ? " checked" : "") + "> في الرئيسية</label>" +
-        '<div class="acts"><button class="btn ghost sm" data-edit="' + esc(x.id) + '">تعديل</button><button class="btn danger sm" data-del="' + esc(x.id) + '">حذف</button></div></div>';
-    }).join("") : '<div class="empty">مفيش منتجات هنا.</div>';
+      return '<article class="pcard"><div class="pimg">' + (x.images[0] ? '<img src="' + esc(imgSrc(x.images[0])) + '" alt="" loading="lazy">' : "<span>مفيش صورة</span>") + "</div>" +
+        '<div class="pbody"><h3>' + esc(x.ar || x.en) + '</h3><p class="muted ltr">' + esc(x.en) + '</p><div class="meta"><span class="tag">' + esc(catName(x.cat)) + '</span><span class="tag soft">' + x.images.length + " صور</span></div></div>" +
+        '<div class="pfoot"><label class="switch"><input type="checkbox" data-feat="' + esc(x.id) + '"' + (x.featured ? " checked" : "") + '><span class="track"></span><span>في الرئيسية</span></label>' +
+        '<div class="acts"><button type="button" class="btn ghost sm" data-edit="' + esc(x.id) + '">تعديل</button><button type="button" class="btn danger sm" data-del="' + esc(x.id) + '">حذف</button></div></div></article>';
+    }).join("") : '<div class="empty">مفيش منتجات هنا. دوس «+ منتج جديد» تضيف أول منتج.</div>';
     box.onclick = function (e) {
       var ed = e.target.closest("[data-edit]"), del = e.target.closest("[data-del]");
       if (ed) editProduct(ed.dataset.edit);
@@ -361,15 +394,16 @@
 
   /* ----- projects ----- */
   function panelProjects(p) {
-    p.innerHTML = '<div class="bar"><span class="spacer"></span><button class="btn primary" id="add-j">+ مشروع جديد</button></div><div class="list" id="jlist"></div>';
+    setHeadActions('<button class="btn primary" id="add-j" type="button">+ مشروع جديد</button>');
+    p.innerHTML = '<div class="pgrid" id="jlist"></div>';
     $("#add-j").onclick = function () { editProject(null); };
     var box = $("#jlist");
     box.innerHTML = content.projects.length ? content.projects.map(function (x) {
       var tn = PROJECT_TYPES.filter(function (t) { return t[0] === x.type; })[0];
-      return '<div class="row">' + (x.images[0] ? '<img class="thumb" src="' + esc(imgSrc(x.images[0])) + '" alt="">' : '<div class="thumb"></div>') +
-        '<div class="r-main"><b>' + esc(x.ar || x.en) + "</b><small>" + esc(tn ? tn[1] : "") + " · " + x.images.length + " صور" + (x.video ? " · فيديو" : "") + "</small></div>" +
-        '<div class="acts"><button class="btn ghost sm" data-edit="' + esc(x.id) + '">تعديل</button><button class="btn danger sm" data-del="' + esc(x.id) + '">حذف</button></div></div>';
-    }).join("") : '<div class="empty">لسه مفيش مشاريع. اضغط «مشروع جديد».</div>';
+      return '<article class="pcard"><div class="pimg">' + (x.images[0] ? '<img src="' + esc(imgSrc(x.images[0])) + '" alt="" loading="lazy">' : "<span>مفيش صورة</span>") + "</div>" +
+        '<div class="pbody"><h3>' + esc(x.ar || x.en) + '</h3><p class="muted ltr">' + esc(x.en) + '</p><div class="meta"><span class="tag">' + esc(tn ? tn[1] : "") + '</span><span class="tag soft">' + x.images.length + " صور</span>" + (x.video ? '<span class="tag soft">فيديو</span>' : "") + "</div></div>" +
+        '<div class="pfoot"><span></span><div class="acts"><button type="button" class="btn ghost sm" data-edit="' + esc(x.id) + '">تعديل</button><button type="button" class="btn danger sm" data-del="' + esc(x.id) + '">حذف</button></div></div></article>';
+    }).join("") : '<div class="empty">لسه مفيش مشاريع. دوس «+ مشروع جديد» تضيف أول مشروع.</div>';
     box.onclick = function (e) {
       var ed = e.target.closest("[data-edit]"), del = e.target.closest("[data-del]");
       if (ed) editProject(ed.dataset.edit);
@@ -405,7 +439,7 @@
     root.innerHTML = "";
     var box = document.createElement("div");
     root.appendChild(box);
-    paintInto(box, content, html() + '<div class="savebar"><button class="btn primary" id="save-btn" type="button">حفظ التغييرات</button></div>');
+    paintInto(box, content, html() + '<div class="savebar' + (dirty ? " dirty" : "") + '" id="savebar"><span class="state"></span><button class="btn primary" id="save-btn" type="button">حفظ التغييرات</button></div>');
     $("#save-btn").onclick = function () { var b = this; b.disabled = true; save().then(function () { b.disabled = false; paintPanel(); }); };
     return box;
   }
@@ -503,9 +537,9 @@
       .catch(function (e) { if (e.message !== "auth") root.innerHTML = '<div class="card">مقدرناش نحمّل المستخدمين.</div>'; });
   }
   function paintUsers(root, d) {
+    setHeadActions('<button class="btn primary" id="add-u" type="button"' + (d.canManage ? "" : " disabled") + '>+ مستخدم جديد</button>');
     root.innerHTML = (d.canManage ? "" : '<div class="hint-box">إضافة مستخدمين من هنا محتاجة Redis. من غيره ضيفهم في Vercel: Settings ← Environment Variables ← <span class="ltr">ADMIN_USERS</span> بالشكل <span class="ltr">sara:Pass12345:editor,omar:Pass67890:owner</span> وأعد النشر.</div>') +
-      '<div class="bar"><span class="muted">المدير يعدّل كل حاجة ويدير المستخدمين. المحرر يعدّل المحتوى بس.</span><span class="spacer"></span>' +
-      '<button class="btn primary" id="add-u"' + (d.canManage ? "" : " disabled") + '>+ مستخدم جديد</button></div><div class="list" id="ulist">' +
+      '<p class="muted note">المدير يعدّل كل حاجة ويدير المستخدمين. المحرر يعدّل المحتوى بس.</p><div class="list" id="ulist">' +
       (d.ownerConfigured ? '<div class="row"><div class="r-main"><b>' + esc(d.ownerUsername) + ' <span class="tag">الحساب الأساسي</span></b><small>مدير · كلمة سره في إعدادات الاستضافة (ADMIN_PASSWORD)</small></div></div>' : "") +
       d.users.map(function (u) {
         if (u.env) {
@@ -584,7 +618,11 @@
     $("#banner-wrap").hidden = !msgs.length;
   }
   function renderWho() {
-    $("#who").textContent = me ? me.name + " · " + (me.role === "owner" ? "مدير" : "محرر") : "";
+    var name = me ? me.name : "";
+    $("#who-name").textContent = name;
+    $("#who-role").textContent = me ? (me.role === "owner" ? "مدير" : "محرر") : "";
+    var first = name.trim().replace(/^ال/, ""); // "المالك" -> "م"
+    $("#avatar").textContent = first ? first.charAt(0).toUpperCase() : "";
   }
   function showApp() {
     $("#login").hidden = true; $("#app").hidden = false;
@@ -618,6 +656,10 @@
       showLogin();
     });
   };
+  $("#burger").onclick = function () { document.body.classList.contains("nav-open") ? closeDrawer() : openDrawer(); };
+  $("#scrim").onclick = closeDrawer;
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeDrawer(); });
+  window.addEventListener("resize", function () { if (window.innerWidth >= 960) closeDrawer(); });
   $("#tabs").addEventListener("click", function (e) {
     var b = e.target.closest("[data-tab]");
     if (!b) return;
