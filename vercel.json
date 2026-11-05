@@ -3,5 +3,8 @@
     "deploymentEnabled": {
       "content": false
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" }
+  ]
 }
