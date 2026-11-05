@@ -8,7 +8,6 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@vercel/blob": "^2.8.1",
     "express": "^4.21.2",
     "multer": "^2.4.0"
   },

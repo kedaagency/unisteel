@@ -17,25 +17,24 @@ First run generates the admin password and saves it in `data/FIRST-ADMIN-PASSWOR
 Change it from the admin panel (Security tab), then delete that file.
 Locally, content goes to `data/content.json` and images to `uploads/`.
 
-## Deploy on Vercel (free)
+## Deploy on Vercel (free, no Blob)
 
-Vercel functions have no writable disk, so edits and images need two free storage add-ons.
-Without them the site still works, but with the built-in default content and a read-only admin.
+Vercel functions have no writable disk, so edits and uploaded photos are kept in **Upstash Redis** (free plan, its own quota, not Vercel's).
+Vercel Blob is **not used**. Without Redis the site still works, but with the built-in default content and a read-only admin.
 
-1. Put the project on GitHub (or use `npx vercel` from this folder). `data/`, `uploads/` and `node_modules/` are ignored.
+1. Put the project on GitHub. `data/`, `uploads/` and `node_modules/` are ignored.
 2. In Vercel: **Add New → Project → import the repo**. Leave all build settings empty (Framework: Other). Vercel detects `server.js` and serves `public/` from its CDN.
-3. In the project: **Storage → Create / Connect Database → Upstash for Redis** (Marketplace, Free plan). Connect it to the project. This adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`). It stores the site content.
-4. **Storage → Create → Blob**, choose **Public** access, connect it to the project. This adds `BLOB_READ_WRITE_TOKEN`. It stores the uploaded images.
-5. **Settings → Environment Variables**: add `ADMIN_PASSWORD` (the admin password, 8+ characters). Optional: `SESSION_SECRET` (any long random text).
-6. **Redeploy** (Deployments → ⋯ → Redeploy) so the new variables are picked up.
-7. Open `https://YOUR-PROJECT.vercel.app/admin/`, log in, and edit. Open a second tab to check the public site.
+3. **Settings → Environment Variables**: add `ADMIN_PASSWORD` (8+ characters, not an easy one). Optional: `ADMIN_USERNAME` (default `admin`).
+4. **Storage → Create / Connect Database → Upstash for Redis** (Marketplace), pick the **Free** plan and connect it to the project. This adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) by itself.
+5. **Redeploy** (Deployments → ⋯ → Redeploy) so the new variables are picked up.
+6. Open `https://YOUR-PROJECT.vercel.app/admin/`, log in, and edit. Open a second tab to check the public site.
 
 Notes for Vercel:
-- The password is changed in Vercel's environment variables, not from the admin panel. After changing it, redeploy; all old admin sessions stop working.
-- Photos are compressed in the browser before upload; a single upload must stay under 4 MB (Vercel's request limit).
-- Admin edits appear on the public site within about 20-30 seconds (short CDN cache).
+- The owner password is changed in Vercel's environment variables, not from the admin panel. After changing it, redeploy; all old admin sessions stop working.
+- Photos are compressed in the browser before upload (a single upload must stay under 4 MB, Vercel's request limit) and stored in Redis. They are served from `/api/img/...` with a one-year cache, so the CDN answers almost every request.
+- Admin edits appear on the public site within about a minute (CDN cache).
 - Content is saved with a backup history in Redis (last 30 versions under the key `unisteel:content:backups`).
-- Free limits: Upstash 500K commands/month; Blob 1 GB storage, 2,000 uploads and 10,000 uncached reads per month. If Blob limits are exceeded, Vercel blocks Blob access for the rest of the 30 days (images stop loading), so keep uploads reasonable.
+- Free limits (Upstash): 256 MB of data and 500K commands per month. Each photo is roughly 100-300 KB, so hundreds of photos fit. The site mostly reads from the CDN, so command use stays low.
 - Login attempt throttling is per server instance on serverless, so it is a soft limit there. Use a long password.
 - Custom domain: Project → Settings → Domains.
 
@@ -69,12 +68,11 @@ Names, numbers and photos shown on the home page, contact page and footer are ed
 | `ADMIN_USERNAME` | no | Username of the built-in owner (default `admin`) |
 | `ADMIN_PASSWORD` | Vercel: yes | Admin password. Locally optional (otherwise generated) |
 | `SESSION_SECRET` | no | Cookie signing key; defaults to a value derived from the password |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`) | Vercel: yes | Content storage |
-| `BLOB_READ_WRITE_TOKEN` | Vercel: yes | Image storage |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`) | Vercel: yes | Content and photo storage (added by the Upstash integration) |
 | `PORT` | no | Local port (default 3000) |
 | `TRUST_PROXY` | non-Vercel proxy | Set to `1` behind nginx/Render/etc. so the login rate limit sees real IPs |
 
 ## Back up
 
 - Local: copy `data/` and `uploads/`.
-- Vercel: Upstash console (Data Browser) and Blob store in the Vercel dashboard.
+- Vercel: Upstash console (Data Browser). Keys: `unisteel:content`, `unisteel:users`, `unisteel:img:*`.

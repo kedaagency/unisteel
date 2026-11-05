@@ -115,7 +115,7 @@
   }
   function uploadError(e) {
     if (e.message === "auth") return;
-    var m = { too_large: "الصورة كبيرة. صغّرها لأقل من 4 ميجا.", unsupported_type: "نوع الملف مش مدعوم. استخدم JPG أو PNG أو WebP.", storage_not_configured: "تخزين الصور مش متضبط. اربط Vercel Blob بالمشروع (شوف README)." }[e.code];
+    var m = { too_large: "الصورة كبيرة. صغّرها لأقل من 4 ميجا.", unsupported_type: "نوع الملف مش مدعوم. استخدم JPG أو PNG أو WebP.", storage_not_configured: "تخزين الصور مش متضبط. اربط Upstash Redis بالمشروع (شوف README)." }[e.code];
     toast(m || "فشل رفع الصورة.", true);
   }
 
@@ -565,7 +565,6 @@
   function renderBanner() {
     var msgs = [];
     if (storage && storage.content === "none") msgs.push("المحتوى مش هيتحفظ: اربط Upstash Redis بالمشروع في Vercel (Storage ← Marketplace).");
-    if (storage && storage.images === "none") msgs.push("رفع الصور مش متفعّل: اربط Vercel Blob (نوع Public) بالمشروع.");
     $("#banner").innerHTML = msgs.map(esc).join("<br>");
     $("#banner-wrap").hidden = !msgs.length;
   }

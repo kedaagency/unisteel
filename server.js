@@ -2,15 +2,14 @@
    Runs in two modes:
    - Local / VPS:  npm start   (http://localhost:3000, admin at /admin/). Content and images are stored in ./data and ./uploads.
    - Vercel:       the Express app is exported and runs as a serverless function. Vercel has no writable disk, so
-                   content is stored in Upstash Redis and images in Vercel Blob (see README.md).
+                   content AND uploaded images are stored in Upstash Redis (see README.md). No Vercel Blob.
    Env (all optional locally):
      PORT, TRUST_PROXY
      ADMIN_USERNAME        username of the built-in owner account (default "admin")
      ADMIN_PASSWORD        password of the built-in owner; required on Vercel; locally generated on first run if missing
      More admin users (owner / editor) are added from the admin panel and stored with the content.
      SESSION_SECRET        optional; otherwise derived from ADMIN_PASSWORD
-     UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN   (or KV_REST_API_URL / KV_REST_API_TOKEN)  -> content storage
-     BLOB_READ_WRITE_TOKEN (or BLOB_STORE_ID with Vercel OIDC)                                      -> image storage */
+     UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN   (or KV_REST_API_URL / KV_REST_API_TOKEN)  -> content storage (content + images) */
 "use strict";
 
 const express = require("express");
@@ -33,7 +32,7 @@ const PORT = process.env.PORT || 3000;
 const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/+$/, "");
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
 const USE_REDIS = !!(REDIS_URL && REDIS_TOKEN);
-const USE_BLOB = !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+const IMG_PREFIX = "unisteel:img:";
 const CONTENT_KEY = "unisteel:content";
 const BACKUP_KEY = "unisteel:content:backups";
 
@@ -210,8 +209,8 @@ function s(v, max) {
   if (v != null && typeof v === "object") return ""; // never turn objects/arrays into "[object Object]" or "a,b"
   return String(v == null ? "" : v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim().slice(0, max || 500);
 }
-// images are local uploads ("uploads/x.webp"), files shipped with the site ("img/products/x.webp") or Vercel Blob public URLs
-const IMG_RE = /^(uploads\/[A-Za-z0-9_.-]+|img\/(?!.*\.\.)[A-Za-z0-9_./-]+|https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/[A-Za-z0-9_./-]+)$/;
+// images are local uploads ("uploads/x.webp"), files shipped with the site ("img/products/x.webp") or images kept in Redis ("api/img/x.webp")
+const IMG_RE = /^(uploads\/[A-Za-z0-9_.-]+|img\/(?!.*\.\.)[A-Za-z0-9_./-]+|api\/img\/[a-z0-9-]+\.(?:webp|jpg|png|gif))$/;
 function img(v) { v = s(v, 300); return IMG_RE.test(v) ? v : ""; }
 function imgs(a, max) { return (Array.isArray(a) ? a : []).map(img).filter(Boolean).slice(0, max || 20); }
 function https(v) { v = s(v, 500); return /^https:\/\/[^\s"'<>]+$/.test(v) ? v : ""; }
@@ -412,14 +411,15 @@ async function readContentCached() {
   return c;
 }
 
-/* ---------------- images: storage (Vercel Blob | local folder) ---------------- */
+/* ---------------- images: storage (Redis | local folder) ---------------- */
 const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+const IMG_NAME_RE = /^[a-z0-9]+-[a-f0-9]{8}\.(webp|jpg|png|gif)$/;
 async function saveImage(buf, ext) {
   const name = Date.now().toString(36) + "-" + crypto.randomBytes(4).toString("hex") + "." + ext;
-  if (USE_BLOB) {
-    const { put } = require("@vercel/blob");
-    const blob = await put("uploads/" + name, buf, { access: "public", contentType: MIME[ext], addRandomSuffix: false });
-    return blob.url;
+  if (USE_REDIS) {
+    // photos are compressed in the browser first (~100-300 KB), so base64 in Redis is small; they are served by GET /api/img/:name
+    await redisCall(["SET", IMG_PREFIX + name, buf.toString("base64")]);
+    return "api/img/" + name;
   }
   if (ON_VERCEL) throw storageError("storage_not_configured");
   fs.writeFileSync(path.join(UPLOADS, name), buf);
@@ -444,10 +444,10 @@ app.use("/api", (req, res, next) => { res.setHeader("Cache-Control", "no-store")
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-// Public content. On Vercel the CDN may serve it for a few seconds, so admin edits show up within ~half a minute.
+// Public content. On Vercel the CDN keeps it for up to a minute (fewer function calls), so admin edits show up within ~1 minute.
 app.get("/api/content", wrap(async (req, res) => {
   const c = await readContentCached();
-  if (ON_VERCEL) res.setHeader("Cache-Control", "public, max-age=0, s-maxage=20, stale-while-revalidate=60");
+  if (ON_VERCEL) res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=300");
   res.json(c);
 }));
 // Admin always reads the live copy (never cached), so it can't save over a newer edit with an old one.
@@ -490,7 +490,7 @@ app.get("/api/me", wrap(async (req, res) => {
     canManageUsers: canManageUsers(),
     storage: {
       content: USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file",
-      images: USE_BLOB ? "blob" : ON_VERCEL ? "none" : "file"
+      images: USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file"
     }
   });
 }));
@@ -612,7 +612,18 @@ app.post("/api/upload", requireAuth, (req, res) => {
   });
 });
 
-// Local mode only: on Vercel static files come from public/ via the CDN and uploads live in Blob.
+// Photos uploaded from the admin when Redis is used. Names are random and never change, so the CDN/browser can keep them for a year.
+app.get("/api/img/:name", wrap(async (req, res) => {
+  const name = String(req.params.name || "");
+  if (!USE_REDIS || !IMG_NAME_RE.test(name)) return res.status(404).json({ error: "not_found" });
+  const b64 = await redisCall(["GET", IMG_PREFIX + name]);
+  if (!b64) return res.status(404).json({ error: "not_found" });
+  res.setHeader("Content-Type", MIME[name.split(".").pop()]);
+  res.setHeader("Cache-Control", "public, max-age=31536000, s-maxage=31536000, immutable");
+  res.send(Buffer.from(b64, "base64"));
+}));
+
+// Local mode only: on Vercel static files come from public/ via the CDN.
 if (!ON_VERCEL) {
   app.use("/uploads", express.static(UPLOADS, { maxAge: "30d", immutable: true, index: false, dotfiles: "deny", fallthrough: false }));
   app.use(express.static(PUBLIC, { extensions: ["html"], dotfiles: "deny" }));
