@@ -293,6 +293,58 @@
   }
 
   /* ---------- page renderers ---------- */
+  /* ---------- auto-moving product strip (home) ----------
+     The cards are doubled so the strip can loop without a jump. It pauses on hover, touch, keyboard focus,
+     while the tab is hidden or the strip is off screen, and it stays still when the visitor prefers reduced motion.
+     People can still drag / swipe it by hand. */
+  var RAIL_SPEED = 42; // pixels per second
+  var rail = { raf: 0, bound: false, hold: false, resumeAt: 0, visible: true, pos: 0, last: 0 };
+  function railLoop(t) {
+    var el = $("#home-rail");
+    if (el && el.classList.contains("auto") && el.children.length > 1) {
+      var n = el.children.length / 2;
+      var loopWidth = Math.abs(el.children[n].getBoundingClientRect().left - el.children[0].getBoundingClientRect().left);
+      var cur = Math.abs(el.scrollLeft);
+      var dt = Math.min(250, t - (rail.last || t)); // capped so a long pause (hidden tab) never causes a jump
+      rail.last = t;
+      if (rail.hold || t < rail.resumeAt || document.hidden || !rail.visible) rail.pos = cur; // follow the visitor's own scrolling
+      else rail.pos += RAIL_SPEED * dt / 1000;
+      if (loopWidth > 0 && rail.pos >= loopWidth) rail.pos -= loopWidth;
+      var target = Math.round(rail.pos);
+      if (Math.abs(target - cur) >= 1) el.scrollLeft = document.documentElement.dir === "rtl" ? -target : target;
+    }
+    rail.raf = requestAnimationFrame(railLoop);
+  }
+  function startRail(el) {
+    el.scrollLeft = 0; rail.pos = 0; rail.last = 0;
+    var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || el.children.length < 3) { el.classList.remove("auto"); return; }
+    var copy = document.createDocumentFragment();
+    Array.prototype.slice.call(el.children).forEach(function (c) {
+      var k = c.cloneNode(true);
+      k.setAttribute("aria-hidden", "true"); k.setAttribute("tabindex", "-1");
+      copy.appendChild(k);
+    });
+    el.appendChild(copy);
+    el.classList.add("auto");
+    if (rail.bound) return;
+    rail.bound = true;
+    var hold = function () { rail.hold = true; };
+    var release = function (ms) { return function () { rail.hold = false; rail.resumeAt = performance.now() + ms; }; };
+    el.addEventListener("pointerenter", hold);
+    el.addEventListener("pointerleave", release(600));
+    el.addEventListener("pointerdown", hold);
+    el.addEventListener("pointerup", release(2500));
+    el.addEventListener("pointercancel", release(2500));
+    el.addEventListener("touchstart", hold, { passive: true });
+    el.addEventListener("touchend", release(2500), { passive: true });
+    el.addEventListener("wheel", function () { rail.resumeAt = performance.now() + 2500; }, { passive: true });
+    el.addEventListener("focusin", hold);
+    el.addEventListener("focusout", release(600));
+    if ("IntersectionObserver" in window) new IntersectionObserver(function (e) { rail.visible = e[0].isIntersecting; }).observe(el);
+    rail.raf = requestAnimationFrame(railLoop);
+  }
+
   var state = { cat: params.get("cat") || "", ptype: "" };
   var DEFAULT_FEATURED = ["gas-range", "undercounter-fridge", "pizza-oven", "hot-holding", "steam-kettle", "prep-table", "display-showcase", "fryer"];
 
@@ -321,6 +373,7 @@
       // keep the rail from looking empty when only a few products are marked for the home page
       PRODUCTS.forEach(function (p) { if (featured.length < 6 && featured.indexOf(p) < 0) featured.push(p); });
       $("#home-rail").innerHTML = featured.slice(0, 12).map(productCard).join("");
+      startRail($("#home-rail"));
       $("#home-svc").innerHTML = svcHtml();
       $("#menu-left").innerHTML = CATEGORIES.slice(0, 3).map(menuItem).join("");
       $("#menu-right").innerHTML = CATEGORIES.slice(3).map(menuItem).join("");
