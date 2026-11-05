@@ -563,17 +563,34 @@
   }
 
   /* ---------- content from the admin panel (falls back to data.js defaults) ---------- */
+  var ON_LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  function contentBase() { return (typeof CONTENT_BASE === "string" && CONTENT_BASE) ? CONTENT_BASE : ""; }
+  // photos uploaded from the admin are stored as "gh/name.webp"; turn them into the real GitHub address
+  function resolveImages(v) {
+    var base = contentBase();
+    if (!base) return v;
+    if (typeof v === "string") return /^gh\/[a-z0-9-]+\.(?:webp|jpg|png|gif)$/.test(v) ? base + "img/" + v.slice(3) : v;
+    if (Array.isArray(v)) return v.map(resolveImages);
+    if (v && typeof v === "object") { Object.keys(v).forEach(function (k) { v[k] = resolveImages(v[k]); }); }
+    return v;
+  }
+  function fetchJson(url) {
+    return fetch(url).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
   function loadContent() {
-    return fetch("/api/content", { cache: "no-store" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    // visitors read the content straight from GitHub; on localhost, or if GitHub has nothing yet, use the server
+    var first = (contentBase() && !ON_LOCALHOST)
+      ? fetchJson(contentBase() + "content.json?t=" + Math.floor(Date.now() / 60000))
+      : Promise.resolve(null);
+    return first.then(function (c) { return c || fetchJson("/api/content"); })
       .then(function (c) {
         if (!c || typeof c !== "object") return;
+        c = resolveImages(c);
         if (c.site) SITE = Object.assign({}, SITE, c.site);
         if (c.categories && c.categories.length) CATEGORIES = c.categories;
         if (Array.isArray(c.products)) PRODUCTS = c.products;
         if (Array.isArray(c.projects)) PROJECTS = c.projects;
-      })
-      .catch(function () {});
+      });
   }
 
   loadContent().then(function () {

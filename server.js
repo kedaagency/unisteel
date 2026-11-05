@@ -1,15 +1,18 @@
 /* UNI STEEL — website + admin API.
    Runs in two modes:
    - Local / VPS:  npm start   (http://localhost:3000, admin at /admin/). Content and images are stored in ./data and ./uploads.
-   - Vercel:       the Express app is exported and runs as a serverless function. Vercel has no writable disk, so
-                   content AND uploaded images are stored in Upstash Redis (see README.md). No Vercel Blob.
+   - Vercel:       the Express app is exported and runs as a serverless function. Vercel has no writable disk, so the admin
+                   saves content and uploaded photos to the GitHub repo (branch "content") through the GitHub API. The public
+                   site reads them straight from GitHub, so Vercel storage and Vercel functions are not used for visitors.
    Env (all optional locally):
      PORT, TRUST_PROXY
      ADMIN_USERNAME        username of the built-in owner account (default "admin")
      ADMIN_PASSWORD        password of the built-in owner; required on Vercel; locally generated on first run if missing
-     More admin users (owner / editor) are added from the admin panel and stored with the content.
+     ADMIN_USERS           extra admin users: "name:password:role,name2:password2" (role owner|editor, default editor)
      SESSION_SECRET        optional; otherwise derived from ADMIN_PASSWORD
-     UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN   (or KV_REST_API_URL / KV_REST_API_TOKEN)  -> content storage (content + images) */
+     GITHUB_TOKEN          token with "Contents: read and write" on the repo -> content + photos live in GitHub
+     GITHUB_REPO           "owner/repo" (default kedaagency/unisteel)      GITHUB_BRANCH  (default "content")
+     UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN   optional alternative to GitHub (content, photos and users) */
 "use strict";
 
 const express = require("express");
@@ -32,6 +35,11 @@ const PORT = process.env.PORT || 3000;
 const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/+$/, "");
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
 const USE_REDIS = !!(REDIS_URL && REDIS_TOKEN);
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
+const GITHUB_REPO = (process.env.GITHUB_REPO || "kedaagency/unisteel").trim();
+const GITHUB_BRANCH = (process.env.GITHUB_BRANCH || "content").trim();
+const GITHUB_API = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
+const USE_GITHUB = !!GITHUB_TOKEN && /^[\w.-]+\/[\w.-]+$/.test(GITHUB_REPO);
 const IMG_PREFIX = "unisteel:img:";
 const CONTENT_KEY = "unisteel:content";
 const BACKUP_KEY = "unisteel:content:backups";
@@ -42,6 +50,7 @@ if (!ON_VERCEL) [DATA, UPLOADS, BACKUPS].forEach((d) => fs.mkdirSync(d, { recurs
 let SECRET;
 if (process.env.SESSION_SECRET) SECRET = process.env.SESSION_SECRET;
 else if (process.env.ADMIN_PASSWORD) SECRET = crypto.createHash("sha256").update("unisteel-session|" + process.env.ADMIN_PASSWORD).digest("hex");
+else if (GITHUB_TOKEN) SECRET = crypto.createHash("sha256").update("unisteel-session|" + GITHUB_TOKEN).digest("hex");
 else if (REDIS_URL && REDIS_TOKEN) SECRET = crypto.createHash("sha256").update("unisteel-session|" + REDIS_TOKEN).digest("hex");
 else if (!ON_VERCEL) {
   if (fs.existsSync(SECRET_FILE)) SECRET = fs.readFileSync(SECRET_FILE, "utf8").trim();
@@ -83,6 +92,7 @@ const OWNER_NAME = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerC
 const USERS_FILE = path.join(DATA, "users.json");
 const USERS_KEY = "unisteel:users";
 const DUMMY_REC = { salt: "0".repeat(32), hash: "0".repeat(128) };
+const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 
 function sign(v) { return crypto.createHmac("sha256", SECRET).update(v).digest("hex"); }
 // the session cookie carries the username and a fingerprint of the password hash, so a password reset or a deleted user ends the session
@@ -148,7 +158,21 @@ function newRec(username, name, role, pw) {
   const salt = crypto.randomBytes(16).toString("hex");
   return { username, name, role, salt, hash: hashPassword(pw, salt), createdAt: new Date().toISOString() };
 }
-function canManageUsers() { return USE_REDIS || !ON_VERCEL; }
+function canManageUsers() { return USE_REDIS || !ON_VERCEL; } // users created from the panel need Redis (or a local file)
+
+// Users defined in the ADMIN_USERS variable ("name:password:role,..."): they work everywhere, are read-only in the panel.
+const ENV_USERS = {};
+String(process.env.ADMIN_USERS || "").split(",").map((x) => x.trim()).filter(Boolean).forEach((item) => {
+  const parts = item.split(":");
+  const username = (parts.shift() || "").trim().toLowerCase();
+  let role = "editor";
+  if (parts.length >= 2 && /^(owner|editor)$/.test(parts[parts.length - 1])) role = parts.pop();
+  const pw = parts.join(":");
+  if (!USERNAME_RE.test(username) || username === OWNER_NAME || pw.length < 8) { console.error("ADMIN_USERS: skipped an invalid entry (" + username + ")"); return; }
+  const rec = newRec(username, username, role, pw);
+  rec.env = true;
+  ENV_USERS[username] = rec;
+});
 let usersCache = { at: 0, v: null };
 async function loadUsers(force) {
   if (!force && usersCache.v && Date.now() - usersCache.at < 5000) return usersCache.v;
@@ -159,16 +183,19 @@ async function loadUsers(force) {
   } else if (!ON_VERCEL) {
     try { u = JSON.parse(fs.readFileSync(USERS_FILE, "utf8")) || {}; } catch (e) { /* no users yet */ }
   }
+  u = Object.assign({}, u, ENV_USERS);
   usersCache = { at: Date.now(), v: u };
   return u;
 }
-async function saveUsers(u) {
+async function saveUsers(all) {
+  const u = {};
+  Object.keys(all).forEach((k) => { if (!all[k].env) u[k] = all[k]; }); // env users are never written to storage
   if (USE_REDIS) await redisCall(["SET", USERS_KEY, JSON.stringify(u)]);
   else if (!ON_VERCEL) { const tmp = USERS_FILE + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(u, null, 2)); fs.renameSync(tmp, USERS_FILE); }
   else throw storageError("storage_not_configured");
-  usersCache = { at: Date.now(), v: u };
+  usersCache = { at: Date.now(), v: Object.assign({}, u, ENV_USERS) };
 }
-function publicUser(u) { return { username: u.username, name: u.name, role: u.role, createdAt: u.createdAt }; }
+function publicUser(u) { return { username: u.username, name: u.name, role: u.role, createdAt: u.createdAt, env: !!u.env }; }
 
 // per-instance login throttle (on serverless each instance has its own counter, so this is best-effort there)
 const attempts = new Map();
@@ -209,8 +236,8 @@ function s(v, max) {
   if (v != null && typeof v === "object") return ""; // never turn objects/arrays into "[object Object]" or "a,b"
   return String(v == null ? "" : v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim().slice(0, max || 500);
 }
-// images are local uploads ("uploads/x.webp"), files shipped with the site ("img/products/x.webp") or images kept in Redis ("api/img/x.webp")
-const IMG_RE = /^(uploads\/[A-Za-z0-9_.-]+|img\/(?!.*\.\.)[A-Za-z0-9_./-]+|api\/img\/[a-z0-9-]+\.(?:webp|jpg|png|gif))$/;
+// images are local uploads ("uploads/x.webp"), files shipped with the site ("img/products/x.webp") images kept in Redis ("api/img/x.webp") or in the GitHub repo ("gh/x.webp")
+const IMG_RE = /^(uploads\/[A-Za-z0-9_.-]+|img\/(?!.*\.\.)[A-Za-z0-9_./-]+|(?:api\/img|gh)\/[a-z0-9-]+\.(?:webp|jpg|png|gif))$/;
 function img(v) { v = s(v, 300); return IMG_RE.test(v) ? v : ""; }
 function imgs(a, max) { return (Array.isArray(a) ? a : []).map(img).filter(Boolean).slice(0, max || 20); }
 function https(v) { v = s(v, 500); return /^https:\/\/[^\s"'<>]+$/.test(v) ? v : ""; }
@@ -350,6 +377,60 @@ async function redisPipeline(cmds) {
   return j;
 }
 
+/* GitHub as storage: files live on the "content" branch of the repo. Git history is the backup. */
+function ghError(r) {
+  const e = new Error("github " + r.status + ": " + ((r.json && r.json.message) || ""));
+  e.code = r.status === 401 || r.status === 403 ? "github_auth" : r.status === 404 ? "github_not_found" : "github_failed";
+  return e;
+}
+async function ghFetch(method, p, body) {
+  const r = await fetch(GITHUB_API + p, {
+    method,
+    headers: Object.assign({
+      Authorization: "Bearer " + GITHUB_TOKEN, Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "unisteel-admin"
+    }, body ? { "Content-Type": "application/json" } : {}),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await r.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (e) { /* not JSON */ }
+  return { status: r.status, ok: r.ok, json };
+}
+let ghBranchReady = false;
+async function ghEnsureBranch() {
+  if (ghBranchReady) return;
+  const b = await ghFetch("GET", "/repos/" + GITHUB_REPO + "/branches/" + encodeURIComponent(GITHUB_BRANCH));
+  if (b.ok) { ghBranchReady = true; return; }
+  if (b.status !== 404) throw ghError(b);
+  // first save: create the content branch from the default branch
+  const repo = await ghFetch("GET", "/repos/" + GITHUB_REPO);
+  if (!repo.ok) throw ghError(repo);
+  const ref = await ghFetch("GET", "/repos/" + GITHUB_REPO + "/git/ref/heads/" + repo.json.default_branch);
+  if (!ref.ok) throw ghError(ref);
+  const mk = await ghFetch("POST", "/repos/" + GITHUB_REPO + "/git/refs", { ref: "refs/heads/" + GITHUB_BRANCH, sha: ref.json.object.sha });
+  if (!mk.ok && mk.status !== 422) throw ghError(mk); // 422: someone created it a moment ago
+  ghBranchReady = true;
+}
+async function ghGet(filePath) {
+  const r = await ghFetch("GET", "/repos/" + GITHUB_REPO + "/contents/" + filePath + "?ref=" + encodeURIComponent(GITHUB_BRANCH));
+  if (r.status === 404) return null; // no file yet (or no branch yet)
+  if (!r.ok) throw ghError(r);
+  return { sha: r.json.sha, buf: Buffer.from(r.json.content || "", "base64") };
+}
+async function ghPut(filePath, buf, message) {
+  await ghEnsureBranch();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const cur = await ghGet(filePath);
+    const body = { message, content: buf.toString("base64"), branch: GITHUB_BRANCH };
+    if (cur) body.sha = cur.sha;
+    const r = await ghFetch("PUT", "/repos/" + GITHUB_REPO + "/contents/" + filePath, body);
+    if (r.ok) return r.json;
+    if (r.status !== 409 && r.status !== 422) throw ghError(r); // 409/422: the file changed meanwhile, read it again and retry
+  }
+  throw new Error("github: too many conflicts");
+}
+
 function readFileContent() {
   try { return normalize(JSON.parse(fs.readFileSync(CONTENT_FILE, "utf8"))); } // normalize also upgrades older saved content
   catch (e) {
@@ -379,6 +460,12 @@ function writeFileContent(c) {
 }
 
 async function readContent() {
+  if (USE_GITHUB) {
+    const f = await ghGet("content.json");
+    if (!f) return seedContent(); // nothing saved yet: built-in defaults (written to GitHub on the first admin save)
+    try { return normalize(JSON.parse(f.buf.toString("utf8"))); }
+    catch (e) { console.error("content.json in GitHub is corrupt, using defaults:", e.message); return seedContent(); }
+  }
   if (USE_REDIS) {
     const raw = await redisCall(["GET", CONTENT_KEY]);
     if (!raw) return seedContent(); // nothing saved yet: show the built-in defaults (not written until the first admin save)
@@ -388,7 +475,11 @@ async function readContent() {
   if (!ON_VERCEL) return readFileContent();
   return seedContent(); // Vercel without Redis: read-only defaults
 }
-async function writeContent(c) {
+async function writeContent(c, who) {
+  if (USE_GITHUB) {
+    await ghPut("content.json", Buffer.from(JSON.stringify(c, null, 2)), "Update site content" + (who ? " (" + who + ")" : ""));
+    return;
+  }
   if (USE_REDIS) {
     const old = await redisCall(["GET", CONTENT_KEY]);
     const cmds = [["SET", CONTENT_KEY, JSON.stringify(c)]];
@@ -399,7 +490,7 @@ async function writeContent(c) {
   if (ON_VERCEL) throw storageError("storage_not_configured");
   writeFileContent(c);
 }
-if (!ON_VERCEL && !USE_REDIS && !fs.existsSync(CONTENT_FILE)) writeFileContent(seedContent());
+if (!ON_VERCEL && !USE_REDIS && !USE_GITHUB && !fs.existsSync(CONTENT_FILE)) writeFileContent(seedContent());
 
 // short in-memory cache so public page views don't hit the database every time
 let cache = { at: 0, value: null };
@@ -411,11 +502,15 @@ async function readContentCached() {
   return c;
 }
 
-/* ---------------- images: storage (Redis | local folder) ---------------- */
+/* ---------------- images: storage (GitHub | Redis | local folder) ---------------- */
 const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 const IMG_NAME_RE = /^[a-z0-9]+-[a-f0-9]{8}\.(webp|jpg|png|gif)$/;
 async function saveImage(buf, ext) {
   const name = Date.now().toString(36) + "-" + crypto.randomBytes(4).toString("hex") + "." + ext;
+  if (USE_GITHUB) {
+    await ghPut("img/" + name, buf, "Upload photo " + name);
+    return "gh/" + name; // the site turns this into the raw.githubusercontent.com address (see public/js/config.js)
+  }
   if (USE_REDIS) {
     // photos are compressed in the browser first (~100-300 KB), so base64 in Redis is small; they are served by GET /api/img/:name
     await redisCall(["SET", IMG_PREFIX + name, buf.toString("base64")]);
@@ -489,8 +584,8 @@ app.get("/api/me", wrap(async (req, res) => {
     configured: adminConfigured(),
     canManageUsers: canManageUsers(),
     storage: {
-      content: USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file",
-      images: USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file"
+      content: USE_GITHUB ? "github" : USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file",
+      images: USE_GITHUB ? "github" : USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file"
     }
   });
 }));
@@ -503,10 +598,10 @@ app.put("/api/content", requireAuth, wrap(async (req, res) => {
   }
   let c;
   try { c = normalize(b); } catch (e) { console.error(e); return res.status(400).json({ error: "invalid_content" }); }
-  try { await writeContent(c); }
+  try { await writeContent(c, req.user.username); }
   catch (e) {
     console.error(e);
-    return res.status(e.code === "storage_not_configured" ? 503 : 500).json({ error: e.code || "write_failed" });
+    return res.status(e.code === "storage_not_configured" ? 503 : /^github_/.test(e.code || "") ? 502 : 500).json({ error: e.code || "write_failed" });
   }
   cache = { at: Date.now(), value: c };
   res.json({ ok: true, content: c });
@@ -530,6 +625,7 @@ app.post("/api/password", requireAuth, wrap(async (req, res) => {
   }
   const users = await loadUsers(true);
   const rec = users[req.user.username];
+  if (rec && rec.env) return res.status(400).json({ error: "password_set_by_env" });
   if (!rec || !verifyRec(current, rec)) return res.status(403).json({ error: "bad_password" });
   if (typeof next !== "string" || next.length < 8) return res.status(400).json({ error: "too_short" });
   const fresh = newRec(rec.username, rec.name, rec.role, next);
@@ -541,7 +637,6 @@ app.post("/api/password", requireAuth, wrap(async (req, res) => {
 }));
 
 /* ---- user management (owners only) ---- */
-const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 app.get("/api/users", requireAuth, requireOwner, wrap(async (req, res) => {
   const list = Object.values(await loadUsers(true)).map(publicUser).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   res.json({ users: list, ownerUsername: OWNER_NAME, ownerConfigured: adminConfigured(), canManage: canManageUsers() });
@@ -566,6 +661,7 @@ app.put("/api/users/:username", requireAuth, requireOwner, wrap(async (req, res)
   const users = await loadUsers(true);
   const rec = users[username];
   if (!rec) return res.status(404).json({ error: "not_found" });
+  if (rec.env) return res.status(409).json({ error: "managed_by_env" });
   if (username === req.user.username && b.role && b.role !== rec.role) return res.status(400).json({ error: "cannot_change_self" });
   if (b.password != null && (typeof b.password !== "string" || b.password.length < 8)) return res.status(400).json({ error: "too_short" });
   const next = b.password ? newRec(username, rec.name, rec.role, b.password) : Object.assign({}, rec);
@@ -582,6 +678,7 @@ app.delete("/api/users/:username", requireAuth, requireOwner, wrap(async (req, r
   if (username === req.user.username) return res.status(400).json({ error: "cannot_delete_self" });
   const users = await loadUsers(true);
   if (!users[username]) return res.status(404).json({ error: "not_found" });
+  if (users[username].env) return res.status(409).json({ error: "managed_by_env" });
   delete users[username];
   await saveUsers(users);
   res.json({ ok: true });
@@ -607,7 +704,7 @@ app.post("/api/upload", requireAuth, (req, res) => {
     try { res.json({ url: await saveImage(req.file.buffer, ext) }); }
     catch (e) {
       console.error(e);
-      res.status(e.code === "storage_not_configured" ? 503 : 500).json({ error: e.code || "write_failed" });
+      res.status(e.code === "storage_not_configured" ? 503 : /^github_/.test(e.code || "") ? 502 : 500).json({ error: e.code || "write_failed" });
     }
   });
 });

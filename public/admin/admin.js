@@ -11,7 +11,11 @@
   ];
 
   /* ---------- helpers ---------- */
-  function imgSrc(u) { return /^https?:\/\//.test(u) ? u : "/" + u; }
+  function imgSrc(u) {
+    if (/^https?:\/\//.test(u)) return u;
+    if (/^gh\//.test(u) && typeof CONTENT_BASE === "string" && CONTENT_BASE) return CONTENT_BASE + "img/" + u.slice(3);
+    return "/" + u;
+  }
   function esc(v) {
     return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -75,13 +79,20 @@
       (!httpsOnly(s.formEndpoint) ? "رابط استقبال النموذج لازم يبدأ بـ https" : "");
   }
 
+  var STORAGE_ERRORS = {
+    storage_not_configured: "التخزين مش متضبط. ضيف GITHUB_TOKEN في إعدادات Vercel (شوف README).",
+    github_auth: "توكن GitHub غلط أو منتهي أو ملوش صلاحية Contents: Read and write على الريبو.",
+    github_not_found: "GitHub مش لاقي الريبو. راجع GITHUB_REPO والتوكن.",
+    github_failed: "GitHub رفض الحفظ. جرّب تاني بعد شوية."
+  };
+
   function save(msg) {
     var bad = siteLinkError();
     if (bad) { toast(bad, true); return Promise.resolve(false); }
     return api("/api/content", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(content) })
       .then(function (j) { content = j.content; dirty = false; toast(msg || "تم الحفظ ✓"); return true; })
       .catch(function (e) {
-        if (e.message !== "auth") toast(e.code === "storage_not_configured" ? "تخزين المحتوى مش متضبط. اربط Upstash Redis بالمشروع (شوف README)." : "فشل الحفظ. جرّب تاني.", true);
+        if (e.message !== "auth") toast(STORAGE_ERRORS[e.code] || "فشل الحفظ. جرّب تاني.", true);
         return false;
       });
   }
@@ -115,7 +126,7 @@
   }
   function uploadError(e) {
     if (e.message === "auth") return;
-    var m = { too_large: "الصورة كبيرة. صغّرها لأقل من 4 ميجا.", unsupported_type: "نوع الملف مش مدعوم. استخدم JPG أو PNG أو WebP.", storage_not_configured: "تخزين الصور مش متضبط. اربط Upstash Redis بالمشروع (شوف README)." }[e.code];
+    var m = { too_large: "الصورة كبيرة. صغّرها لأقل من 4 ميجا.", unsupported_type: "نوع الملف مش مدعوم. استخدم JPG أو PNG أو WebP.", storage_not_configured: STORAGE_ERRORS.storage_not_configured, github_auth: STORAGE_ERRORS.github_auth, github_not_found: STORAGE_ERRORS.github_not_found, github_failed: STORAGE_ERRORS.github_failed }[e.code];
     toast(m || "فشل رفع الصورة.", true);
   }
 
@@ -482,7 +493,8 @@
     storage_not_configured: "تخزين المستخدمين مش متضبط. اربط Upstash Redis بالمشروع.",
     cannot_change_self: "مينفعش تغيّر صلاحيتك بنفسك.",
     cannot_delete_self: "مينفعش تحذف حسابك بنفسك.",
-    too_many_users: "وصلت للحد الأقصى من المستخدمين."
+    too_many_users: "وصلت للحد الأقصى من المستخدمين.",
+    managed_by_env: "المستخدم ده متحدد في إعدادات Vercel (ADMIN_USERS) ومينفعش يتعدل من هنا."
   };
   function roleLabel(r) { return r === "owner" ? "مدير (كل الصلاحيات)" : "محرر (تعديل المحتوى)"; }
   function panelUsers(root) {
@@ -491,11 +503,14 @@
       .catch(function (e) { if (e.message !== "auth") root.innerHTML = '<div class="card">مقدرناش نحمّل المستخدمين.</div>'; });
   }
   function paintUsers(root, d) {
-    root.innerHTML = (d.canManage ? "" : '<div class="hint-box bad">إضافة المستخدمين محتاجة تخزين دائم: اربط Upstash Redis بالمشروع في Vercel.</div>') +
+    root.innerHTML = (d.canManage ? "" : '<div class="hint-box">إضافة مستخدمين من هنا محتاجة Redis. من غيره ضيفهم في Vercel: Settings ← Environment Variables ← <span class="ltr">ADMIN_USERS</span> بالشكل <span class="ltr">sara:Pass12345:editor,omar:Pass67890:owner</span> وأعد النشر.</div>') +
       '<div class="bar"><span class="muted">المدير يعدّل كل حاجة ويدير المستخدمين. المحرر يعدّل المحتوى بس.</span><span class="spacer"></span>' +
       '<button class="btn primary" id="add-u"' + (d.canManage ? "" : " disabled") + '>+ مستخدم جديد</button></div><div class="list" id="ulist">' +
       (d.ownerConfigured ? '<div class="row"><div class="r-main"><b>' + esc(d.ownerUsername) + ' <span class="tag">الحساب الأساسي</span></b><small>مدير · كلمة سره في إعدادات الاستضافة (ADMIN_PASSWORD)</small></div></div>' : "") +
       d.users.map(function (u) {
+        if (u.env) {
+          return '<div class="row"><div class="r-main"><b>' + esc(u.name) + ' <span class="tag">من إعدادات Vercel</span></b><small><span class="ltr">' + esc(u.username) + "</span> · " + roleLabel(u.role) + "</small></div></div>";
+        }
         return '<div class="row"><div class="r-main"><b>' + esc(u.name) + '</b><small><span class="ltr">' + esc(u.username) + "</span> · " + roleLabel(u.role) + "</small></div>" +
           '<div class="acts"><button class="btn ghost sm" data-uedit="' + esc(u.username) + '">تعديل</button>' +
           (u.username === me.username ? "" : '<button class="btn danger sm" data-udel="' + esc(u.username) + '">حذف</button>') + "</div></div>";
@@ -564,7 +579,7 @@
   var storage = null;
   function renderBanner() {
     var msgs = [];
-    if (storage && storage.content === "none") msgs.push("المحتوى مش هيتحفظ: اربط Upstash Redis بالمشروع في Vercel (Storage ← Marketplace).");
+    if (storage && storage.content === "none") msgs.push("المحتوى مش هيتحفظ: ضيف GITHUB_TOKEN في إعدادات Vercel (شوف README) وأعد النشر.");
     $("#banner").innerHTML = msgs.map(esc).join("<br>");
     $("#banner-wrap").hidden = !msgs.length;
   }

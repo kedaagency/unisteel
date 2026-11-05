@@ -17,26 +17,31 @@ First run generates the admin password and saves it in `data/FIRST-ADMIN-PASSWOR
 Change it from the admin panel (Security tab), then delete that file.
 Locally, content goes to `data/content.json` and images to `uploads/`.
 
-## Deploy on Vercel (free, no Blob)
+## Deploy on Vercel (free: nothing stored on Vercel)
 
-Vercel functions have no writable disk, so edits and uploaded photos are kept in **Upstash Redis** (free plan, its own quota, not Vercel's).
-Vercel Blob is **not used**. Without Redis the site still works, but with the built-in default content and a read-only admin.
+How it works: the **admin saves content and photos into this GitHub repo** (branch `content`, through the GitHub API). Visitors' browsers read them straight from GitHub (`raw.githubusercontent.com`), so Vercel needs no Blob, no Redis and no function calls for the public site. Vercel only serves the static pages and runs the small admin API.
 
-1. Put the project on GitHub. `data/`, `uploads/` and `node_modules/` are ignored.
-2. In Vercel: **Add New → Project → import the repo**. Leave all build settings empty (Framework: Other). Vercel detects `server.js` and serves `public/` from its CDN.
-3. **Settings → Environment Variables**: add `ADMIN_PASSWORD` (8+ characters, not an easy one). Optional: `ADMIN_USERNAME` (default `admin`).
-4. **Storage → Create / Connect Database → Upstash for Redis** (Marketplace), pick the **Free** plan and connect it to the project. This adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) by itself.
-5. **Redeploy** (Deployments → ⋯ → Redeploy) so the new variables are picked up.
-6. Open `https://YOUR-PROJECT.vercel.app/admin/`, log in, and edit. Open a second tab to check the public site.
+1. Put the project on GitHub (public repo) and import it in Vercel: **Add New → Project → pick the repo**. Leave build settings empty (Framework: Other).
+2. **Settings → Environment Variables**: add `ADMIN_PASSWORD` (8+ characters, not an easy one). Optional: `ADMIN_USERNAME` (default `admin`).
+3. Create a GitHub token for the admin to write with (account that owns the repo): **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+   - Resource owner: the repo owner. Repository access: **Only select repositories → unisteel**.
+   - Repository permissions: **Contents → Read and write**. Expiration: the longest allowed (set a reminder to renew it).
+   - If the owner is an organization that blocks fine-grained tokens, use a classic token with the `public_repo` scope instead.
+4. In Vercel add the environment variable `GITHUB_TOKEN` = that token (mark it Sensitive). Optional: `GITHUB_REPO` (`owner/repo`, default `kedaagency/unisteel`) and `GITHUB_BRANCH` (default `content`).
+5. **Redeploy** (Deployments → ⋯ → Redeploy).
+6. Open `https://YOUR-PROJECT.vercel.app/admin/`, log in, change something and save. A branch named `content` appears in the GitHub repo with `content.json` and an `img/` folder. `vercel.json` stops Vercel from building that branch, so edits never trigger a deployment.
 
-Notes for Vercel:
-- The owner password is changed in Vercel's environment variables, not from the admin panel. After changing it, redeploy; all old admin sessions stop working.
-- Photos are compressed in the browser before upload (a single upload must stay under 4 MB, Vercel's request limit) and stored in Redis. They are served from `/api/img/...` with a one-year cache, so the CDN answers almost every request.
-- Admin edits appear on the public site within about a minute (CDN cache).
-- Content is saved with a backup history in Redis (last 30 versions under the key `unisteel:content:backups`).
-- Free limits (Upstash): 256 MB of data and 500K commands per month. Each photo is roughly 100-300 KB, so hundreds of photos fit. The site mostly reads from the CDN, so command use stays low.
-- Login attempt throttling is per server instance on serverless, so it is a soft limit there. Use a long password.
+Notes:
+- The repo must stay **public** (the site reads the files from raw.githubusercontent.com). The address is set in `public/js/config.js`; change it if the repo or branch is renamed.
+- Edits show on the public site within about 1-5 minutes (GitHub's cache). Photos appear as soon as GitHub serves them.
+- Photos are compressed in the browser before upload (one upload must stay under 4 MB, Vercel's request limit).
+- Every save is a Git commit on the `content` branch, so the history is the backup and any version can be restored from GitHub.
+- The owner password is changed in Vercel's environment variables, not from the admin panel. After changing it, redeploy; old admin sessions stop working.
+- More admin users without any database: add `ADMIN_USERS` in Vercel, e.g. `sara:Pass12345:editor,omar:Pass67890:owner` (role `owner` or `editor`, passwords of 8+ characters without commas or colons). They show read-only in the Users tab. Creating users from the panel needs Redis (optional, see below).
+- Until the first save, visitors get the built-in default content (from the code).
+- Login attempt throttling is per server instance on serverless, so it is a soft limit there. Use long passwords.
 - Custom domain: Project → Settings → Domains.
+- Optional alternative to GitHub: connect Upstash Redis (adds `KV_REST_API_URL` / `KV_REST_API_TOKEN`) to keep content and photos in Redis and to create users from the panel. If `GITHUB_TOKEN` is set, GitHub is used for content and photos.
 
 ## Admin users
 
@@ -58,6 +63,8 @@ Names, numbers and photos shown on the home page, contact page and footer are ed
 | `public/` | The website (HTML, CSS, JS, logo files) |
 | `public/admin/` | The admin panel |
 | `public/js/data.js` | Default content (also loaded by the server as the starting content) |
+| `public/js/config.js` | Address the public site reads content and photos from (GitHub raw) |
+| `vercel.json` | Stops Vercel from building the `content` branch |
 | `server.js` | Express app: `/api/*`, login, uploads. Exported for Vercel, listens on a port when run directly |
 | `data/`, `uploads/` | Local mode only: content, backups (last 40), images |
 
@@ -68,11 +75,15 @@ Names, numbers and photos shown on the home page, contact page and footer are ed
 | `ADMIN_USERNAME` | no | Username of the built-in owner (default `admin`) |
 | `ADMIN_PASSWORD` | Vercel: yes | Admin password. Locally optional (otherwise generated) |
 | `SESSION_SECRET` | no | Cookie signing key; defaults to a value derived from the password |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`) | Vercel: yes | Content and photo storage (added by the Upstash integration) |
+| `GITHUB_TOKEN` | Vercel: yes | Lets the admin save content and photos to the GitHub repo |
+| `GITHUB_REPO` / `GITHUB_BRANCH` | no | Repo (`owner/repo`, default `kedaagency/unisteel`) and branch (default `content`) |
+| `ADMIN_USERS` | no | Extra admin users: `name:password:role,...` |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_URL` / `KV_REST_API_TOKEN`) | no | Optional alternative to GitHub, and needed to create users from the panel |
 | `PORT` | no | Local port (default 3000) |
 | `TRUST_PROXY` | non-Vercel proxy | Set to `1` behind nginx/Render/etc. so the login rate limit sees real IPs |
 
 ## Back up
 
 - Local: copy `data/` and `uploads/`.
-- Vercel: Upstash console (Data Browser). Keys: `unisteel:content`, `unisteel:users`, `unisteel:img:*`.
+- Vercel / GitHub mode: nothing to back up, the `content` branch of the repo is the copy (and its commit history).
+- Redis mode: Upstash console (Data Browser). Keys: `unisteel:content`, `unisteel:users`, `unisteel:img:*`.
