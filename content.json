@@ -459,7 +459,7 @@
       "dEn": "Mobile stainless unit with a door, a digital controller and indicator lights.",
       "detAr": "",
       "detEn": "",
-      "featured": false,
+      "featured": true,
       "images": [
         "img/products/mobile-control-unit.webp"
       ],
@@ -515,7 +515,7 @@
       "dEn": "",
       "detAr": "",
       "detEn": "",
-      "featured": false,
+      "featured": true,
       "images": [
         "gh/mw3hiq8s-7f4256a7.webp"
       ],
