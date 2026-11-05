@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>لوحة تحكم UNI STEEL</title>
+<link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<section id="login" class="login" hidden>
+  <form class="login-card" id="login-form">
+    <img src="/img/logo-black.png" alt="UNI STEEL" class="login-logo">
+    <h1>لوحة التحكم</h1>
+    <p class="muted">ادخل كلمة السر عشان تعدّل في الموقع.</p>
+    <label class="f"><span>اسم المستخدم</span><input type="text" id="login-user" autocomplete="username" dir="ltr" autocapitalize="none" spellcheck="false" required></label>
+    <label class="f"><span>كلمة السر</span><input type="password" id="login-pw" autocomplete="current-password" required></label>
+    <div class="err" id="login-err" hidden></div>
+    <button class="btn primary block" type="submit">دخول</button>
+    <p class="muted small">نسيت كلمة السر؟ اطلب من مدير الموقع يغيّرها لك.</p>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header class="top">
+    <div class="top-in">
+      <img src="/img/logo-white.png" alt="UNI STEEL" class="top-logo">
+      <span class="top-title">لوحة التحكم</span>
+      <span class="spacer"></span>
+      <span class="who" id="who"></span>
+      <a class="btn ghost-light" href="/" target="_blank" rel="noopener">عرض الموقع</a>
+      <button class="btn ghost-light" id="logout" type="button">خروج</button>
+    </div>
+  </header>
+
+  <div class="wrap" id="banner-wrap" hidden><div class="hint-box bad" id="banner"></div></div>
+  <nav class="tabs" id="tabs"></nav>
+  <main class="wrap" id="panel"></main>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="/admin/admin.js"></script>
+</body>
+</html>

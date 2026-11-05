@@ -1,0 +1,9 @@
+data
+uploads
+node_modules
+*.log
+.env
+!.env.example
+3.png
+4.png
+board-creations
