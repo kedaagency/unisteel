@@ -41,6 +41,7 @@ Notes:
 - Until the first save, visitors get the built-in default content (from the code).
 - Login attempt throttling is per server instance on serverless, so it is a soft limit there. Use long passwords.
 - Custom domain: Project → Settings → Domains.
+- **Vercel Hobby only builds commits authored by the account owner** (the GitHub account linked to Vercel). Commits from another GitHub user or e-mail are blocked with "the commit author doesn't have permission". Push from the owner's account, or set the owner's identity (`git config user.name` / `user.email`, e.g. the `ID+username@users.noreply.github.com` address) before committing.
 - Optional alternative to GitHub: connect Upstash Redis (adds `KV_REST_API_URL` / `KV_REST_API_TOKEN`) to keep content and photos in Redis and to create users from the panel. If `GITHUB_TOKEN` is set, GitHub is used for content and photos.
 
 ## Admin users
