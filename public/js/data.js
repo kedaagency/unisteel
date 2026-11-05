@@ -9,7 +9,7 @@ var SITE = {
   // People shown on the site (name + number + optional photo). `phones` is derived from this list.
   // Photos used on the site (empty = placeholder). Uploaded from the admin panel, or put files in public/img/.
   images: {
-    hero: "img/hero/hero.webp", factory: "", about: "", menu: "",
+    hero: "img/hero/hero.webp", factory: "img/services/fabrication.webp", about: "img/services/fabrication.webp", menu: "img/services/menu.webp",
     svc: ["img/services/fabrication.webp", "img/services/delivery.webp", "img/services/handover.webp"],
     venues: {
       restaurant: "img/venues/restaurant.webp", hotel: "img/venues/hotel.webp", cafe: "img/venues/cafe.webp",
@@ -88,17 +88,17 @@ var PRODUCTS = [
 /* Sample projects: PLACEHOLDERS until the company sends 5–10 real ones (with client permission).
    Add `images: [...]` and `video` once available. */
 var PROJECTS = [
-  { id: "p1", type: "restaurant", ar: "مطبخ مطعم",           en: "Restaurant Kitchen",
+  { id: "p1", type: "restaurant", images: ["img/venues/restaurant.webp"], ar: "مطبخ مطعم",           en: "Restaurant Kitchen",
     items: { ar: "بوتجازات، قلايات، ترابيزات تحضير، تلاجات", en: "Ranges, fryers, prep tables, fridges" } },
-  { id: "p2", type: "hotel",      ar: "مطبخ فندق",           en: "Hotel Kitchen",
+  { id: "p2", type: "hotel", images: ["img/venues/hotel.webp"],      ar: "مطبخ فندق",           en: "Hotel Kitchen",
     items: { ar: "خط إنتاج، حلل بخارية، كاونترات بوفيه", en: "Production line, steam kettles, buffet counters" } },
-  { id: "p3", type: "cafe",       ar: "كافيه",               en: "Café",
+  { id: "p3", type: "cafe", images: ["img/venues/cafe.webp"],       ar: "كافيه",               en: "Café",
     items: { ar: "فاترينات عرض، أندر كاونتر، ترابيزة باريستا", en: "Display showcases, undercounters, barista table" } },
-  { id: "p4", type: "central",    ar: "مطبخ مركزي",          en: "Central Kitchen",
+  { id: "p4", type: "central", images: ["img/venues/central.webp"],    ar: "مطبخ مركزي",          en: "Central Kitchen",
     items: { ar: "حلل بخارية، أحواض، تلاجات رأسية", en: "Steam kettles, sinks, upright fridges" } },
-  { id: "p5", type: "catering",   ar: "شركة كاترينج",        en: "Catering Company",
+  { id: "p5", type: "catering", images: ["img/venues/catering.webp"],   ar: "شركة كاترينج",        en: "Catering Company",
     items: { ar: "دواليب حفظ سخن، بان ماري، ترابيزات", en: "Hot holding cabinets, bain-maries, tables" } },
-  { id: "p6", type: "restaurant", ar: "مطعم بيتزا",          en: "Pizza Restaurant",
+  { id: "p6", type: "restaurant", images: ["img/hero/hero.webp"], ar: "مطعم بيتزا",          en: "Pizza Restaurant",
     items: { ar: "أفران بيتزا، أندر كاونتر، ترابيزات تحضير", en: "Pizza ovens, undercounters, prep tables" } }
 ];
 

@@ -449,3 +449,79 @@ main { margin-top: -70px; }
 .hero-float b { font-family: var(--font-head); font-size: .92rem; }
 .hero-float small { color: var(--orange-dark); font-weight: 700; font-size: .8rem; }
 @media (min-width: 760px) { .hero-floats { display: block; } }
+
+
+/* =====================================================================
+   Polish + light motion
+   ===================================================================== */
+html { scroll-padding-top: 96px; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+::selection { background: var(--orange); color: #fff; }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+
+.section { padding-block: 72px; }
+@media (max-width: 700px) { .section { padding-block: 52px; } }
+.section-head h2::after, .row-head h2::after, .split h2::after { content: ""; display: block; width: 44px; height: 4px; border-radius: 99px; background: var(--orange); margin-top: 14px; }
+.section-head.center h2::after { margin-inline: auto; }
+.row-head > a.btn { align-self: center; }
+
+.cat-card, .product-card, .project-card, .step, .fact, .stat, .person, .svc { box-shadow: 0 1px 2px rgba(20, 20, 20, .05); }
+.btn { transition: transform .2s ease, box-shadow .2s ease, background .15s, color .15s, border-color .15s; }
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(0); }
+.btn-primary:hover { box-shadow: 0 10px 22px -8px rgba(242, 107, 29, .75); }
+.btn-dark:hover { box-shadow: 0 10px 22px -10px rgba(0, 0, 0, .55); }
+.step { transition: transform .25s ease, box-shadow .25s ease; }
+.step:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(0, 0, 0, .08); }
+.circle { transition: transform .3s ease; }
+.circle:hover { transform: translateY(-4px); }
+.circle .ph { transition: box-shadow .3s ease; }
+.circle:hover .ph { box-shadow: 0 0 0 5px var(--card), 0 0 0 8px var(--orange); }
+.menu-item { transition: transform .25s ease; }
+.person { transition: transform .25s ease, box-shadow .25s ease; }
+.person:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(0, 0, 0, .08); }
+
+/* photos zoom softly on hover (mouse only) */
+.product-card .ph img, .project-card .ph img, .cat-card .ph img, .circle .ph img, .svc .ph img { transition: transform .8s cubic-bezier(.2, .7, .2, 1); }
+@media (hover: hover) {
+  .product-card:hover .ph img, .project-card:hover .ph img, .cat-card:hover .ph img, .circle:hover .ph img, .svc:hover .ph img { transform: scale(1.05); }
+}
+
+/* header: a little more depth once the page is scrolled; thin reading-progress line on top */
+.pill { transition: box-shadow .3s ease; }
+body.scrolled .pill { box-shadow: 0 16px 36px rgba(0, 0, 0, .32); }
+.progress { position: fixed; top: 0; inset-inline: 0; height: 3px; z-index: 80; background: var(--orange); transform: scaleX(var(--p, 0)); transform-origin: 0 50%; pointer-events: none; }
+[dir="rtl"] .progress { transform-origin: 100% 50%; }
+
+/* motion (everything below is skipped when the visitor asks for reduced motion) */
+@keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes settle { from { transform: scale(1.07); } to { transform: scale(1); } }
+@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -7px; } }
+@keyframes ring {
+  0% { box-shadow: 0 6px 20px rgba(0, 0, 0, .25), 0 0 0 0 rgba(37, 211, 102, .55); }
+  70%, 100% { box-shadow: 0 6px 20px rgba(0, 0, 0, .25), 0 0 0 16px rgba(37, 211, 102, 0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* sections and cards rise in as they come into view (classes are added by app.js, so nothing is hidden without JS) */
+  .reveal { opacity: 0; }
+  .reveal.in { animation: rise .75s cubic-bezier(.2, .7, .2, 1) var(--d, 0ms) both; }
+
+  /* hero entrance */
+  .hero .eyebrow, .hero h1, .hero p.lead, .hero-cta { animation: rise .85s cubic-bezier(.2, .7, .2, 1) both; }
+  .hero h1 { animation-delay: .08s; }
+  .hero p.lead { animation-delay: .18s; }
+  .hero-cta { animation-delay: .28s; }
+  .hero-stage { animation: rise 1s cubic-bezier(.2, .7, .2, 1) .35s both; }
+  .hero .chips { animation: fade .9s ease .75s both; }
+  .hero-media img { animation: settle 2.2s cubic-bezier(.2, .7, .2, 1) both; }
+  .hero-float { animation: bob 6.5s ease-in-out infinite; }
+  .hero-float:nth-child(2) { animation-delay: -3.2s; }
+
+  .wa-float { animation: ring 3.4s ease-out 2.5s infinite; }
+  .faq details[open] > p { animation: fade .4s ease both; }
+  .modal-box { animation: rise .35s cubic-bezier(.2, .7, .2, 1) both; }
+}
+@media (prefers-reduced-motion: reduce) { .progress { display: none; } }

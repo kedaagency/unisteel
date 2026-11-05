@@ -505,11 +505,63 @@
     document.querySelectorAll("[data-wa]").forEach(function (a) { a.href = waLink(t(a.dataset.wa)); });
   }
 
-  function renderAll() {
+  /* ---------- light motion: rise-in on scroll, header depth, reading progress ---------- */
+  var REVEAL_SEL = ".section-head,.row-head,.dark-block > h2,.dark-block > p,.cat-card,.project-card,.step,.fact,.stat,.person,.svc,.menu-item,.menu-center,.circle,.split > *,.cta-band .container > *,.faq-wrap > *,.specs,.gallery,.product-info,.form,.info-card,.venues,.grid > .product-card,.page-head .container > *";
+  var revealIO = null;
+  function initReveal(instant) {
+    var items = document.querySelectorAll(REVEAL_SEL);
+    var calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (calm || !("IntersectionObserver" in window)) return; // nothing is hidden, so nothing to reveal
+    if (!revealIO) {
+      revealIO = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          var el = e.target;
+          revealIO.unobserve(el);
+          el.classList.add("in");
+          // hand the element back to its normal hover styles once the entrance has played
+          el.addEventListener("animationend", function () { el.classList.remove("reveal", "in"); el.style.removeProperty("--d"); }, { once: true });
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+    }
+    var order = new Map();
+    Array.prototype.forEach.call(items, function (el) {
+      if (el.dataset.rv || el.closest(".rail")) return;
+      el.dataset.rv = "1";
+      if (instant) return; // language switch: no replay, content is simply there
+      el.classList.add("reveal");
+      var p = el.parentElement, i = order.get(p) || 0;
+      order.set(p, i + 1);
+      el.style.setProperty("--d", Math.min(i, 6) * 70 + "ms");
+      revealIO.observe(el);
+    });
+  }
+  var chromeBound = false;
+  function initChrome() {
+    if (chromeBound) return;
+    chromeBound = true;
+    var bar = document.createElement("div");
+    bar.className = "progress"; bar.setAttribute("aria-hidden", "true");
+    document.body.appendChild(bar);
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      bar.style.setProperty("--p", max > 0 ? Math.min(1, window.scrollY / max).toFixed(4) : 0);
+      document.body.classList.toggle("scrolled", window.scrollY > 12);
+    }
+    window.addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+  }
+
+  function renderAll(first) {
     applyStatic();
     renderHeader();
     renderFooter();
     if (renderers[page]) renderers[page]();
+    initReveal(!first);
+    initChrome();
   }
 
   function setLang(l) {
@@ -648,6 +700,6 @@
 
   loadContent().then(function () {
     loadTracking();
-    renderAll();
+    renderAll(true);
   });
 })();
