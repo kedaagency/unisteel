@@ -726,6 +726,15 @@ if (!ON_VERCEL) {
   app.use(express.static(PUBLIC, { extensions: ["html"], dotfiles: "deny" }));
 }
 
+// On Vercel the Express function also receives "/" (the CDN does not map it to public/index.html here),
+// so hand the visitor to the static home page instead of showing a 404. Query strings (?lang=en) are kept.
+if (ON_VERCEL) {
+  app.get("/", (req, res) => {
+    const q = req.originalUrl.indexOf("?");
+    res.redirect(302, "/index.html" + (q > -1 ? req.originalUrl.slice(q) : ""));
+  });
+}
+
 const NOT_FOUND_HTML = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
   '<meta name="robots" content="noindex"><title>404 | UNI STEEL</title></head>' +
   '<body style="font-family:system-ui,sans-serif;background:#f5f3ef;color:#1b1b1b;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px">' +
