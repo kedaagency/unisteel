@@ -356,7 +356,12 @@
     home: function () {
       var hm = $("#hero-media");
       var hi = siteImg("hero");
-      hm.innerHTML = (hi ? '<img src="' + esc(hi) + '" alt="">' : "") +
+      // an uploaded file (mp4/webm) plays by itself, muted, on top of the photo; a Facebook/YouTube link opens in the popup
+      var hv = SITE.heroVideo || "";
+      var direct = /\.(mp4|webm)(\?|$)/i.test(hv);
+      var still = (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) || (navigator.connection && navigator.connection.saveData);
+      hm.innerHTML = (direct ? '<video class="hero-vid" src="' + esc(hv) + '"' + (hi ? ' poster="' + esc(hi) + '"' : "") + (still ? "" : " autoplay") + ' muted loop playsinline preload="metadata" aria-hidden="true" tabindex="-1"></video>'
+        : hi ? '<img src="' + esc(hi) + '" alt="">' : "") +
         (SITE.heroVideo ? '<button class="play hero-play" type="button" data-video="' + esc(SITE.heroVideo) + '" aria-label="' + t("hero.watch") + '">' + PLAY_ICON + "<em>" + t("hero.watch") + "</em></button>" : "") +
         (hi ? "" : '<span class="ph-label">' + t("hero.media") + "</span>");
       hm.classList.toggle("has-img", !!hi);

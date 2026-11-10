@@ -65,6 +65,7 @@
 
   /* ---------- link checks (the server silently drops invalid links, so tell the person instead) ---------- */
   function httpsOnly(v) { return !v || /^https:\/\/\S+$/.test(v); }
+  function videoOk(v) { return !v || /^https:\/\/\S+$/.test(v) || /^\/uploads\/[\w.-]+\.(mp4|webm)$/.test(v); }
   function fixMapEmbed() {
     var v = String(content.site.mapEmbed || "").trim();
     var m = v.match(/<iframe[^>]*\ssrc\s*=\s*["']([^"']+)["']/i); // people paste the whole <iframe> snippet from Google Maps
@@ -76,7 +77,7 @@
   function siteLinkError() {
     var s = content.site;
     return fixMapEmbed() ||
-      (!httpsOnly(s.heroVideo) ? "رابط فيديو الصفحة الرئيسية لازم يبدأ بـ https" : "") ||
+      (!videoOk(s.heroVideo) ? "رابط فيديو الصفحة الرئيسية لازم يبدأ بـ https" : "") ||
       (!httpsOnly(s.formEndpoint) ? "رابط استقبال النموذج لازم يبدأ بـ https" : "");
   }
 
@@ -131,6 +132,47 @@
     toast(m || "فشل رفع الصورة.", true);
   }
 
+  /* ---------- video upload (sent in 3 MB pieces: Vercel rejects bigger requests) ---------- */
+  var VCHUNK = 3 * 1024 * 1024, VMAX = 20 * 1024 * 1024;
+  function hex(n) { var b = new Uint8Array(n); crypto.getRandomValues(b); return Array.prototype.map.call(b, function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+  function uploadVideo(file, onProgress) {
+    var id = hex(8), n = Math.ceil(file.size / VCHUNK), refs = [];
+    function send(i, tries) {
+      var fd = new FormData();
+      fd.append("id", id); fd.append("i", String(i)); fd.append("chunk", file.slice(i * VCHUNK, (i + 1) * VCHUNK), "part");
+      return api("/api/video/chunk", { method: "POST", body: fd })
+        .then(function (j) { refs[i] = j.ref; onProgress((i + 1) / (n + 1)); })
+        .catch(function (e) {
+          var fatal = e.message === "auth" || e.code === "too_large" || e.code === "video_unsupported" || e.code === "github_auth" || e.code === "github_not_found";
+          if (fatal || tries >= 2) throw e;
+          return send(i, tries + 1); // a flaky mobile connection: try this piece again
+        });
+    }
+    var chain = Promise.resolve();
+    for (var i = 0; i < n; i++) (function (k) { chain = chain.then(function () { return send(k, 0); }); })(i);
+    return chain.then(function () {
+      return api("/api/video/finish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: id, refs: refs }) });
+    }).then(function (j) { onProgress(1); return j.url; });
+  }
+  // the CDN fetches a brand-new file from GitHub on its first request: wait until it answers so the site never shows a broken video
+  function waitReady(url, tries) {
+    return fetch(url, { method: "HEAD" }).then(function (r) { if (!r.ok) throw new Error("not ready"); return true; })
+      .catch(function () {
+        if (tries <= 0) return false;
+        return new Promise(function (res) { setTimeout(res, 3000); }).then(function () { return waitReady(url, tries - 1); });
+      });
+  }
+  function videoError(e) {
+    if (e.message === "auth") return;
+    var m = {
+      too_large: "الفيديو كبير. أقصى حجم 20 ميجا.", unsupported_type: "نوع الفيديو مش مدعوم. استخدم MP4 أو WebM.",
+      video_unsupported: "رفع الفيديو شغال مع GitHub بس. استخدم رابط فيديو بدل الرفع.",
+      storage_not_configured: STORAGE_ERRORS.storage_not_configured, github_auth: STORAGE_ERRORS.github_auth,
+      github_not_found: STORAGE_ERRORS.github_not_found, github_failed: STORAGE_ERRORS.github_failed
+    }[e.code];
+    toast(m || "فشل رفع الفيديو. جرّب تاني.", true);
+  }
+
   /* ---------- field builders ---------- */
   function tf(label, k, o) {
     o = o || {};
@@ -146,6 +188,7 @@
   }
   function chk(label, k) { return '<label class="chk"><input type="checkbox" data-k="' + k + '"> ' + label + "</label>"; }
   function imgList(path, max) { return '<div data-imglist="' + path + '" data-max="' + (max || 12) + '"></div>'; }
+  function vidUp(path) { return '<div class="vup" data-vid="' + path + '"></div>'; }
   function imgOne(path) { return '<div data-single="' + path + '"></div>'; }
   function addBtn(path, tpl, label) {
     return '<button type="button" class="btn ghost sm" data-add="' + path + '" data-tpl="' + esc(JSON.stringify(tpl)) + '">+ ' + label + "</button>";
@@ -216,6 +259,40 @@
       };
       var cl = $("[data-clear]", box);
       if (cl) cl.onclick = function () { setPath(obj, path, ""); touch(obj); mountImages(root, obj); };
+    });
+
+    root.querySelectorAll("[data-vid]").forEach(function (box) {
+      var path = box.dataset.vid, cur = getPath(obj, path);
+      if (!canVideo) {
+        box.innerHTML = '<p class="muted small">رفع الفيديو من الجهاز بيشتغل لما التخزين يكون على GitHub. دلوقتي استخدم رابط فيديو (يوتيوب أو فيسبوك).</p>';
+        return;
+      }
+      box.innerHTML = '<div class="vup-row"><label class="btn ghost sm">' + (cur && /\.(mp4|webm)(\?|$)/i.test(cur) ? "استبدال الفيديو" : "رفع فيديو من الجهاز") +
+        '<input type="file" accept="video/mp4,video/webm" hidden></label><span class="vup-note muted small">MP4 أو WebM، حتى 20 ميجا (الأفضل أقل من 15 ميجا، 720p، من 15 لـ 30 ثانية).</span></div>' +
+        '<div class="vbar" hidden><i></i></div>';
+      var inp = $("input[type=file]", box), bar = $(".vbar", box), fill = $(".vbar i", box), note = $(".vup-note", box);
+      inp.onchange = function () {
+        var f = inp.files[0];
+        inp.value = "";
+        if (!f) return;
+        if (!/^video\/(mp4|webm)$/.test(f.type) && !/\.(mp4|webm)$/i.test(f.name)) { toast("اختار ملف MP4 أو WebM.", true); return; }
+        if (f.size > VMAX) { toast("الفيديو " + Math.round(f.size / 1048576) + " ميجا، وأقصى حجم 20 ميجا. صغّره الأول (720p).", true); return; }
+        bar.hidden = false; fill.style.width = "2%"; note.textContent = "جاري رفع الفيديو... متقفلش الصفحة.";
+        box.classList.add("busy");
+        uploadVideo(f, function (p) { fill.style.width = Math.max(2, Math.round(p * 100)) + "%"; })
+          .then(function (url) {
+            note.textContent = "جاري تجهيز الفيديو...";
+            return waitReady(url, 15).then(function (ready) {
+              setPath(obj, path, url); touch(obj);
+              var field = root.querySelector('[data-k="' + path + '"]');
+              if (field) field.value = url;
+              toast(ready ? "تم رفع الفيديو ✓ (اضغط «حفظ التغييرات»)" : "تم رفع الفيديو. ممكن يتأخر دقيقة لحد ما يظهر (اضغط «حفظ التغييرات»).");
+              mountImages(root, obj);
+            });
+          })
+          .catch(function (e) { videoError(e); bar.hidden = true; note.textContent = "MP4 أو WebM، حتى 20 ميجا."; })
+          .then(function () { box.classList.remove("busy"); });
+      };
     });
   }
 
@@ -418,7 +495,7 @@
     return '<div class="card"><h2>الأساسيات</h2><div class="grid2">' + tf("نوع المكان", "type", { options: PROJECT_TYPES }) + "<div></div></div>" +
       bi("اسم المشروع", "ar", "en") + bi("الأجهزة المركّبة", "items.ar", "items.en", { hint: "مثال: بوتجازات، قلايات، ترابيزات تحضير" }) + "</div>" +
       '<div class="card"><h2>الصور</h2>' + imgList("images", 24) + "</div>" +
-      '<div class="card"><h2>فيديو (اختياري)</h2>' + tf("رابط الفيديو", "video", { dir: "ltr", ph: "https://www.youtube.com/watch?v=...", hint: "يوتيوب أو فيميو أو ملف mp4. لازم يبدأ بـ https" }) + "</div>" +
+      '<div class="card"><h2>فيديو (اختياري)</h2>' + tf("رابط الفيديو", "video", { dir: "ltr", ph: "https://www.youtube.com/watch?v=...", hint: "رابط يوتيوب أو فيميو أو فيسبوك أو ملف mp4 (لازم يبدأ بـ https)، أو ارفع فيديو من الجهاز تحت." }) + vidUp("video") + "</div>" +
       '<div class="card"><h2>تفاصيل المشروع</h2>' + bi("وصف", "detAr", "detEn", { area: true, rows: 4 }) + "</div>";
   }
   function editProject(id) {
@@ -427,7 +504,7 @@
     editor(existing ? "تعديل: " + (existing.ar || existing.en) : "مشروع جديد", draft, projectBody, function (d) {
       if (!d.ar.trim() && !d.en.trim()) { toast("اكتب اسم المشروع", true); return false; }
       d.video = (d.video || "").trim();
-      if (!httpsOnly(d.video)) { toast("رابط الفيديو لازم يبدأ بـ https", true); return false; }
+      if (!videoOk(d.video)) { toast("رابط الفيديو لازم يبدأ بـ https", true); return false; }
       if (existing) content.projects = content.projects.map(function (x) { return x.id === id ? d : x; });
       else { d.id = slug(d.en) || rid("project"); content.projects.push(d); }
       return save().then(function (ok) { if (ok) paintPanel(); return ok; });
@@ -457,7 +534,7 @@
     settingsPanel(root, function () {
       return '<div class="hint-box">الصور بتتحول تلقائياً لحجم مناسب للموقع. لو مفيش صورة، بيظهر مكانها شكل فاضي.</div>' +
         '<div class="card"><h2>أول شاشة (Hero)</h2><p class="muted">الصورة الكبيرة اللي في الكارت تحت العنوان.</p>' + imgOne("site.images.hero") +
-        '<div style="margin-top:14px">' + tf("رابط فيديو (اختياري)", "site.heroVideo", { dir: "ltr", ph: "https://www.youtube.com/watch?v=...", hint: "لو اتحط، بيظهر زر تشغيل على الصورة." }) + "</div></div>" +
+        '<div style="margin-top:14px">' + tf("فيديو المصنع (اختياري)", "site.heroVideo", { dir: "ltr", ph: "https://www.facebook.com/reel/...", hint: "رابط فيسبوك أو يوتيوب أو فيميو بيفتح في نافذة لما الزائر يضغط على «شاهد مصنعنا». لو رفعت ملف MP4 بيشتغل لوحده بدون صوت فوق الصورة، ويفتح بالصوت لما يتضغط عليه." }) + vidUp("site.heroVideo") + "</div></div>" +
         '<div class="card"><h2>الخدمات (3 كروت)</h2><div class="grid3">' +
         [0, 1, 2].map(function (i) { return "<div><b>" + ["تصنيع بالمقاس", "توصيل وتركيب", "تسليم جاهز للتشغيل"][i] + "</b>" + imgOne("site.images.svc." + i) + "</div>"; }).join("") + "</div></div>" +
         '<div class="card"><h2>أقسام المنتجات (الدايرة اللي في النص)</h2>' + imgOne("site.images.menu") + "</div>" +
@@ -611,6 +688,7 @@
     setTimeout(function () { ($("#login-user").value ? $("#login-pw") : $("#login-user")).focus(); }, 50);
   }
   var storage = null;
+  var canVideo = false; // can this server take video uploads? (GitHub or local mode)
   function renderBanner() {
     var msgs = [];
     if (storage && storage.content === "none") msgs.push("المحتوى مش هيتحفظ: ضيف GITHUB_TOKEN في إعدادات Vercel (شوف README) وأعد النشر.");
@@ -638,7 +716,7 @@
     err.hidden = true;
     api("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: $("#login-user").value.trim(), password: $("#login-pw").value }) })
       .then(function () { return api("/api/me"); })
-      .then(function (m) { storage = m.storage; me = m.user; return content ? content : api("/api/admin/content"); }) // after an expired session keep the unsaved edits already on screen
+      .then(function (m) { storage = m.storage; canVideo = !!m.canUploadVideo; me = m.user; return content ? content : api("/api/admin/content"); }) // after an expired session keep the unsaved edits already on screen
       .then(function (c) { content = c; $("#login-pw").value = ""; showApp(); })
       .catch(function (e2) {
         err.textContent = e2.code === "too_many_attempts" ? "محاولات كتير. استنى 15 دقيقة وجرّب تاني."
@@ -668,7 +746,7 @@
   });
 
   api("/api/me").then(function (m) {
-    storage = m.storage;
+    storage = m.storage; canVideo = !!m.canUploadVideo;
     me = m.user;
     if (!m.authed) return showLogin();
     return api("/api/admin/content").then(function (c) { content = c; showApp(); });

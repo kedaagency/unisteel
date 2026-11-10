@@ -201,3 +201,11 @@ img, svg { max-width: 100%; }
   .toast { inset-block-end: 84px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* video upload */
+.vup { margin-top: 10px; }
+.vup-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.vup .btn { cursor: pointer; }
+.vbar { height: 8px; border-radius: 99px; background: #e5e1d8; overflow: hidden; margin-top: 10px; }
+.vbar i { display: block; height: 100%; width: 0; background: var(--orange); border-radius: 99px; transition: width .3s ease; }
+.vup.busy .btn { opacity: .5; pointer-events: none; }

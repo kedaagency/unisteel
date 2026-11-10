@@ -240,6 +240,8 @@ function s(v, max) {
 const IMG_RE = /^(uploads\/[A-Za-z0-9_.-]+|img\/(?!.*\.\.)[A-Za-z0-9_./-]+|(?:api\/img|gh)\/[a-z0-9-]+\.(?:webp|jpg|png|gif))$/;
 function img(v) { v = s(v, 300); return IMG_RE.test(v) ? v : ""; }
 function imgs(a, max) { return (Array.isArray(a) ? a : []).map(img).filter(Boolean).slice(0, max || 20); }
+// video links: any https address, or a file uploaded to this same server when running locally
+function videoUrl(v) { v = s(v, 500); return /^(https:\/\/[^\s"'<>]+|\/uploads\/[A-Za-z0-9_.-]+\.(mp4|webm))$/.test(v) ? v : ""; }
 function https(v) { v = s(v, 500); return /^https:\/\/[^\s"'<>]+$/.test(v) ? v : ""; }
 function obj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
 function arr(v) { return Array.isArray(v) ? v : []; }
@@ -281,7 +283,7 @@ function normalize(b) {
     formEndpoint: https(st.formEndpoint),
     ga: s(st.ga, 30).replace(/[^A-Za-z0-9-]/g, ""),
     pixel: s(st.pixel, 30).replace(/\D/g, ""),
-    heroVideo: https(st.heroVideo),
+    heroVideo: videoUrl(st.heroVideo),
     stats: arr(st.stats).slice(0, 8).map((x) => { x = obj(x); return { value: s(x.value, 20), ar: s(x.ar, 80), en: s(x.en, 80) }; }).filter((x) => x.value),
     credentials: arr(st.credentials).slice(0, 20).map((x) => { x = obj(x); return { ar: s(x.ar, 100), en: s(x.en, 100) }; }).filter((x) => x.ar || x.en),
     exportCountries: {
@@ -338,7 +340,7 @@ function normalize(b) {
     ar: s(p.ar, 120), en: s(p.en, 120),
     items: bi(p.items),
     detAr: s(p.detAr, 4000), detEn: s(p.detEn, 4000),
-    video: https(p.video),
+    video: videoUrl(p.video),
     images: imgs(p.images, 24)
   })).filter((p) => p.ar || p.en), "project");
 
@@ -583,6 +585,7 @@ app.get("/api/me", wrap(async (req, res) => {
     passwordFromEnv: !!process.env.ADMIN_PASSWORD,
     configured: adminConfigured(),
     canManageUsers: canManageUsers(),
+    canUploadVideo: canUploadVideo(),
     storage: {
       content: USE_GITHUB ? "github" : USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file",
       images: USE_GITHUB ? "github" : USE_REDIS ? "redis" : ON_VERCEL ? "none" : "file"
@@ -708,6 +711,85 @@ app.post("/api/upload", requireAuth, (req, res) => {
     }
   });
 });
+
+/* ---------------- video upload ----------------
+   Vercel Functions reject request bodies over 4.5 MB, so the admin sends the file in ~3 MB pieces. Each piece is parked
+   (a Git blob in GitHub mode, a temp file locally) and "finish" stitches them into one file. In GitHub mode the video is
+   committed to the content branch and served by jsDelivr (a free CDN with range support, pinned to that commit), so
+   visitors never stream it from Vercel. jsDelivr does not serve GitHub files over 20 MB. */
+const VIDEO_MAX = 20 * 1024 * 1024;
+const VIDEO_CHUNK = 3 * 1024 * 1024;
+const VIDEO_MAX_PARTS = Math.ceil(VIDEO_MAX / VIDEO_CHUNK) + 1;
+const VIDEO_TMP = path.join(DATA, "video-tmp");
+const vupload = multer({ storage: multer.memoryStorage(), limits: { fileSize: VIDEO_CHUNK + 512 * 1024, files: 1 } });
+function canUploadVideo() { return USE_GITHUB || (!ON_VERCEL && !USE_REDIS); }
+function sniffVideo(buf) {
+  if (buf.length > 16 && buf.slice(4, 8).toString() === "ftyp" && buf.slice(8, 12).toString() !== "qt  ") return "mp4";
+  if (buf.length > 16 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "webm";
+  return null;
+}
+function storageStatus(e) { return e.code === "storage_not_configured" ? 503 : /^github_/.test(e.code || "") ? 502 : 500; }
+app.post("/api/video/chunk", requireAuth, (req, res) => {
+  if (!canUploadVideo()) return res.status(400).json({ error: "video_unsupported" });
+  vupload.single("chunk")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "too_large" : "upload_failed" });
+    const id = String((req.body && req.body.id) || ""), i = parseInt(req.body && req.body.i, 10);
+    if (!req.file || !/^[a-f0-9]{16}$/.test(id) || !(i >= 0 && i < VIDEO_MAX_PARTS)) return res.status(400).json({ error: "bad_request" });
+    try {
+      if (USE_GITHUB) {
+        const r = await ghFetch("POST", "/repos/" + GITHUB_REPO + "/git/blobs", { content: req.file.buffer.toString("base64"), encoding: "base64" });
+        if (!r.ok) throw ghError(r);
+        return res.json({ ref: r.json.sha });
+      }
+      fs.mkdirSync(VIDEO_TMP, { recursive: true });
+      fs.writeFileSync(path.join(VIDEO_TMP, id + "-" + i), req.file.buffer);
+      res.json({ ref: String(i) });
+    } catch (e) { console.error(e); res.status(storageStatus(e)).json({ error: e.code || "write_failed" }); }
+  });
+});
+app.post("/api/video/finish", requireAuth, wrap(async (req, res) => {
+  if (!canUploadVideo()) return res.status(400).json({ error: "video_unsupported" });
+  const id = String((req.body && req.body.id) || "");
+  const refs = Array.isArray(req.body && req.body.refs) ? req.body.refs.map(String) : [];
+  if (!/^[a-f0-9]{16}$/.test(id) || !refs.length || refs.length > VIDEO_MAX_PARTS) return res.status(400).json({ error: "bad_request" });
+  const parts = [];
+  let total = 0;
+  try {
+    for (let k = 0; k < refs.length; k++) {
+      let b;
+      if (USE_GITHUB) {
+        if (!/^[0-9a-f]{40}$/.test(refs[k])) return res.status(400).json({ error: "bad_request" });
+        const r = await ghFetch("GET", "/repos/" + GITHUB_REPO + "/git/blobs/" + refs[k]);
+        if (!r.ok) throw ghError(r);
+        b = Buffer.from(r.json.content || "", "base64");
+      } else {
+        if (refs[k] !== String(k)) return res.status(400).json({ error: "bad_request" });
+        b = fs.readFileSync(path.join(VIDEO_TMP, id + "-" + k));
+      }
+      total += b.length;
+      if (total > VIDEO_MAX) return res.status(400).json({ error: "too_large" });
+      parts.push(b);
+    }
+  } catch (e) {
+    if (e.code === "ENOENT") return res.status(400).json({ error: "bad_request" });
+    console.error(e); return res.status(storageStatus(e)).json({ error: e.code || "write_failed" });
+  }
+  const buf = Buffer.concat(parts);
+  const ext = sniffVideo(buf);
+  if (!ext) return res.status(400).json({ error: "unsupported_type" });
+  const name = Date.now().toString(36) + "-" + crypto.randomBytes(4).toString("hex") + "." + ext;
+  try {
+    if (USE_GITHUB) {
+      const put = await ghPut("video/" + name, buf, "Upload video " + name + " (" + req.user.username + ")");
+      const sha = put && put.commit && put.commit.sha;
+      if (!/^[0-9a-f]{40}$/.test(sha || "")) throw new Error("github: no commit sha in the answer");
+      return res.json({ url: "https://cdn.jsdelivr.net/gh/" + GITHUB_REPO + "@" + sha + "/video/" + name });
+    }
+    fs.writeFileSync(path.join(UPLOADS, name), buf);
+    refs.forEach((_, k) => { try { fs.unlinkSync(path.join(VIDEO_TMP, id + "-" + k)); } catch (e) { /* already gone */ } });
+    res.json({ url: "/uploads/" + name });
+  } catch (e) { console.error(e); res.status(storageStatus(e)).json({ error: e.code || "write_failed" }); }
+}));
 
 // Photos uploaded from the admin when Redis is used. Names are random and never change, so the CDN/browser can keep them for a year.
 app.get("/api/img/:name", wrap(async (req, res) => {

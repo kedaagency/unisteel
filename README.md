@@ -88,3 +88,17 @@ Names, numbers and photos shown on the home page, contact page and footer are ed
 - Local: copy `data/` and `uploads/`.
 - Vercel / GitHub mode: nothing to back up, the `content` branch of the repo is the copy (and its commit history).
 - Redis mode: Upstash console (Data Browser). Keys: `unisteel:content`, `unisteel:users`, `unisteel:img:*`.
+
+## Factory video
+
+The hero has a **«شاهد مصنعنا»** button. Set the link from the admin (Images tab → "فيديو المصنع"):
+
+- a Facebook / YouTube / Vimeo link opens in a popup player;
+- an uploaded **MP4/WebM** file also plays by itself, muted, over the hero photo, and opens with sound when tapped.
+
+**Upload from the admin** (works in GitHub mode and when running locally): the browser sends the file in 3 MB pieces
+(Vercel rejects request bodies over 4.5 MB), the server stitches them and commits the file to the `content` branch under
+`video/`. Visitors watch it from jsDelivr (`cdn.jsdelivr.net/gh/<repo>@<commit>/video/…`), a free CDN with range support,
+so the video never streams through Vercel. Limits: **20 MB** per file (jsDelivr does not serve larger GitHub files; aim for
+under 15 MB: 720p, 15–30 seconds). The repo must stay public. Each upload stays in the branch history, so don't upload
+dozens of videos.

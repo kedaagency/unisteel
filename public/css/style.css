@@ -357,7 +357,7 @@ main { margin-top: -70px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
 
 /* hero media with real photo */
-.hero-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hero-media img, .hero-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .hero-media .play { z-index: 1; }
 
 /* product gallery thumbs as buttons */
