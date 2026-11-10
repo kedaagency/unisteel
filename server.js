@@ -349,7 +349,7 @@ function seedContent() {
   const d = DEFAULTS;
   const site = Object.assign({}, d.SITE);
   site.images = Object.assign({ hero: "", factory: "", about: "", menu: "", svc: ["", "", ""], venues: {} }, d.SITE.images || {});
-  site.heroVideo = "";
+  site.heroVideo = d.SITE.heroVideo || "";
   return normalize({ site, categories: d.CATEGORIES, products: d.PRODUCTS, projects: d.PROJECTS });
 }
 

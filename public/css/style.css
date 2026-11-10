@@ -525,3 +525,18 @@ body.scrolled .pill { box-shadow: 0 16px 36px rgba(0, 0, 0, .32); }
   .modal-box { animation: rise .35s cubic-bezier(.2, .7, .2, 1) both; }
 }
 @media (prefers-reduced-motion: reduce) { .progress { display: none; } }
+
+
+/* factory video: labelled play button on the hero + vertical Facebook reel in the popup */
+.hero-play { width: auto; height: auto; border-radius: 99px; padding: 10px 22px 10px 12px; gap: 12px; grid-auto-flow: column; cursor: pointer; z-index: 1; transition: transform .2s ease, box-shadow .2s ease; }
+[dir="rtl"] .hero-play { padding: 10px 12px 10px 22px; }
+.hero-play svg { width: 44px; height: 44px; padding: 13px; border-radius: 50%; background: var(--orange); color: #fff; box-sizing: border-box; }
+.hero-play em { font-style: normal; font-weight: 700; color: #1a1a1a; font-size: 1rem; white-space: nowrap; }
+.hero-play:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 14px 32px rgba(0, 0, 0, .3); }
+.video.vertical { aspect-ratio: 9 / 16; height: auto; width: min(100%, calc(min(76vh, 720px) * 9 / 16)); margin-inline: auto; }
+.modal-box:has(.video.vertical) { max-width: 460px; }
+.video-link { text-align: center; margin: 12px 0 0; font-size: .92rem; }
+.video-link a { color: var(--orange); font-weight: 600; }
+@keyframes playring { 0% { box-shadow: 0 8px 24px rgba(0, 0, 0, .25), 0 0 0 0 rgba(242, 107, 29, .55); } 70%, 100% { box-shadow: 0 8px 24px rgba(0, 0, 0, .25), 0 0 0 18px rgba(242, 107, 29, 0); } }
+@media (prefers-reduced-motion: no-preference) { .hero-play { animation: playring 2.8s ease-out 1.4s infinite; } .hero-play:hover { animation: none; } }
+@media (max-width: 520px) { .hero-play em { font-size: .92rem; } .hero-play { padding-inline: 10px 16px; } [dir="rtl"] .hero-play { padding-inline: 16px 10px; } }

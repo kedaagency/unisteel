@@ -8,6 +8,7 @@ var SITE = {
   whatsapp: "201019182323",              // international format, no + or spaces
   // People shown on the site (name + number + optional photo). `phones` is derived from this list.
   // Photos used on the site (empty = placeholder). Uploaded from the admin panel, or put files in public/img/.
+  heroVideo: "https://www.facebook.com/reel/2144294756353854",   // factory video (Facebook reel); plays in a popup from the hero
   images: {
     hero: "img/hero/hero.webp", factory: "img/services/fabrication.webp", about: "img/services/fabrication.webp", menu: "img/services/menu.webp",
     svc: ["img/services/fabrication.webp", "img/services/delivery.webp", "img/services/handover.webp"],

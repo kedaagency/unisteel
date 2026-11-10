@@ -101,6 +101,10 @@
   function videoHtml(url) {
     var yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
     if (yt) return '<div class="video"><iframe src="https://www.youtube.com/embed/' + yt[1] + '?autoplay=1" allow="autoplay; encrypted-media; fullscreen" allowfullscreen title="Video"></iframe></div>';
+    if (/^https:\/\/((www|m|web)\.)?facebook\.com\/(reel\/|watch|[^\/?#]+\/videos\/)|^https:\/\/fb\.watch\//.test(url)) {
+      return '<div class="video"><iframe src="https://www.facebook.com/plugins/video.php?href=' + encodeURIComponent(url) + '&show_text=false&autoplay=true&t=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="Video"></iframe></div>' +
+        '<p class="video-link"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + t("common.openfb") + " ↗</a></p>";
+    }
     var vm = url.match(/vimeo\.com\/(\d+)/);
     if (vm) return '<div class="video"><iframe src="https://player.vimeo.com/video/' + vm[1] + '?autoplay=1" allow="autoplay; fullscreen" allowfullscreen title="Video"></iframe></div>';
     if (/\.(mp4|webm)(\?|$)/i.test(url)) return '<div class="video"><video src="' + esc(url) + '" controls autoplay playsinline></video></div>';
@@ -353,7 +357,7 @@
       var hm = $("#hero-media");
       var hi = siteImg("hero");
       hm.innerHTML = (hi ? '<img src="' + esc(hi) + '" alt="">' : "") +
-        (SITE.heroVideo ? '<button class="play" type="button" data-video="' + esc(SITE.heroVideo) + '" aria-label="Play">' + PLAY_ICON + "</button>" : "") +
+        (SITE.heroVideo ? '<button class="play hero-play" type="button" data-video="' + esc(SITE.heroVideo) + '" aria-label="' + t("hero.watch") + '">' + PLAY_ICON + "<em>" + t("hero.watch") + "</em></button>" : "") +
         (hi ? "" : '<span class="ph-label">' + t("hero.media") + "</span>");
       hm.classList.toggle("has-img", !!hi);
 
