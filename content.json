@@ -14,7 +14,7 @@
     "formEndpoint": "",
     "ga": "",
     "pixel": "",
-    "heroVideo": "",
+    "heroVideo": "https://cdn.jsdelivr.net/gh/kedaagency/unisteel@da627ea253406a2d41ac5bb4a2b6107dea2f1a80/video/mwaqnihj-890a65c3.mp4",
     "stats": [],
     "credentials": [],
     "exportCountries": {
@@ -22,7 +22,7 @@
       "en": []
     },
     "images": {
-      "hero": "img/hero/hero.webp",
+      "hero": "",
       "factory": "",
       "about": "",
       "menu": "",
